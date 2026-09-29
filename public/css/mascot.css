@@ -1,0 +1,170 @@
+/* ── Mascot robot — เดินไปมาที่ขอบล่างของ .content ── */
+.mascot-svg {
+  position: fixed;
+  left: 0;
+  bottom: 16px;
+  z-index: 50; /* ต่ำกว่า modal-overlay (200) แต่สูงกว่าตาราง */
+  width: 56px;
+  height: auto;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity .3s ease-out;
+}
+.mascot-svg.hidden { display: none; }
+.mascot-svg.modal-dim { opacity: .3; }
+
+@media (max-width: 768px) {
+  .mascot-svg { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* การเคลื่อนที่คือแก่นของฟีเจอร์นี้ — reduced motion แล้วซ่อนไปเลย ไม่ใช่แค่หยุด animation */
+  .mascot-svg { display: none; }
+}
+
+/* ── โครงหุ่น ── */
+.mascot-head, .mascot-body, .mascot-leg, .mascot-arm {
+  fill: var(--bg-elevated);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.mascot-antenna-line { stroke: var(--border); stroke-width: 2; }
+
+/* ── เงาใต้หุ่น — เป็น sibling ของ #mascotPosture (ไม่ใช่ลูก) โดยตั้งใจ
+   ตรึงอยู่ระดับพื้นตลอด ไม่ขยับขึ้นลงตาม idle-breathe/jump ของตัวหุ่น ── */
+.mascot-shadow {
+  fill: rgba(0, 0, 0, .3);
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform .3s ease-out, opacity .3s ease-out;
+}
+.mascot-shadow.walking { animation: mascot-shadow-pulse .6s ease-in-out infinite; }
+.mascot-shadow.jump-shrink { animation: mascot-shadow-jump .5s ease-out; }
+@keyframes mascot-shadow-pulse {
+  0%, 100% { transform: scaleX(1); opacity: .3; }
+  50%      { transform: scaleX(.7); opacity: .22; }
+}
+@keyframes mascot-shadow-jump {
+  0%   { transform: scale(1); opacity: .3; }
+  40%  { transform: scale(.55); opacity: .18; }
+  100% { transform: scale(1); opacity: .3; }
+}
+
+.mascot-eye, .mascot-chest, .mascot-antenna-dot {
+  fill: var(--teal);
+  transition: fill .3s ease-out;
+}
+.mascot-eye { transform-box: fill-box; transform-origin: 50% 50%; }
+.mascot-leg { transform-box: fill-box; transform-origin: 50% 0%; }
+
+.mascot-alert, .mascot-zzz {
+  font: 700 13px var(--font, sans-serif);
+  opacity: 0;
+}
+.mascot-alert { fill: var(--amber); }
+.mascot-zzz { fill: var(--text-dim); }
+
+/* ── สถานะ ── */
+#mascotSvg.status-happy .mascot-antenna-dot { animation: mascot-antenna-pulse 2.5s ease-in-out infinite; }
+
+#mascotSvg.status-worried .mascot-eye,
+#mascotSvg.status-worried .mascot-chest,
+#mascotSvg.status-worried .mascot-antenna-dot { fill: var(--amber); }
+#mascotSvg.status-worried .mascot-chest { animation: mascot-chest-pulse-fast .5s ease-in-out infinite; }
+
+#mascotSvg.status-sleeping .mascot-eye,
+#mascotSvg.status-sleeping .mascot-chest,
+#mascotSvg.status-sleeping .mascot-antenna-dot { fill: var(--text-dim); }
+
+.mascot-eye.blinking { animation: mascot-eye-blink .15s ease-in-out; }
+.mascot-eye.eyes-closed { transform: scaleY(0.12); transition: transform .3s ease-out; }
+
+.mascot-alert.show { opacity: 1; animation: mascot-alert-pop .3s ease-out; }
+.mascot-zzz.show { animation: mascot-zzz-float 2s ease-out infinite; }
+
+/* ── ทิศทางเดิน ── */
+.mascot-facing { transform-box: fill-box; transform-origin: 50% 50%; }
+.mascot-facing.facing-left { transform: scaleX(-1); }
+
+/* ── ท่าทาง (posture) — ทุกคลาสแยกกัน ไม่เปิดพร้อมกันเกิน 1 อัน ── */
+.mascot-posture { transform-box: fill-box; }
+
+.mascot-posture.walking { transform-origin: 50% 50%; animation: mascot-body-bob .6s ease-in-out infinite; }
+.mascot-posture.walking .mascot-leg.leg-a { animation: mascot-leg-swing-a .6s ease-in-out infinite; }
+.mascot-posture.walking .mascot-leg.leg-b { animation: mascot-leg-swing-b .6s ease-in-out infinite; }
+
+.mascot-posture.idle-breathe { transform-origin: 50% 50%; animation: mascot-idle-breathe 3s ease-in-out infinite; }
+
+.mascot-posture.shake { transform-origin: 50% 50%; animation: mascot-shake .15s ease-in-out infinite; }
+
+.mascot-posture.sit { transform-origin: 50% 100%; transform: scaleY(0.82); transition: transform .4s ease-out; }
+
+.mascot-posture.spin-once { transform-origin: 50% 50%; animation: mascot-spin-once .6s ease-in-out; }
+.mascot-posture.jump-spin { transform-origin: 50% 50%; animation: mascot-jump-spin .5s ease-out; }
+
+/* ── keyframes — ใช้เฉพาะ transform/opacity ── */
+@keyframes mascot-body-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+@keyframes mascot-leg-swing-a {
+  0%, 100% { transform: rotate(-12deg); }
+  50%      { transform: rotate(12deg); }
+}
+@keyframes mascot-leg-swing-b {
+  0%, 100% { transform: rotate(12deg); }
+  50%      { transform: rotate(-12deg); }
+}
+@keyframes mascot-idle-breathe {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+@keyframes mascot-shake {
+  0%, 100% { transform: translateX(-1px); }
+  50%      { transform: translateX(1px); }
+}
+@keyframes mascot-spin-once {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes mascot-jump-spin {
+  0%   { transform: translateY(0) rotate(0deg); }
+  40%  { transform: translateY(-14px) rotate(180deg); }
+  100% { transform: translateY(0) rotate(360deg); }
+}
+@keyframes mascot-eye-blink {
+  0%, 100% { transform: scaleY(1); }
+  50%      { transform: scaleY(0.1); }
+}
+@keyframes mascot-antenna-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .35; }
+}
+@keyframes mascot-chest-pulse-fast {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .3; }
+}
+@keyframes mascot-alert-pop {
+  from { opacity: 0; transform: translateY(4px) scale(.8); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes mascot-zzz-float {
+  0%   { opacity: 0; transform: translateY(0); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* ── ปุ่มเปิด/ปิดใน sidebar ── */
+#mascotToggle { justify-content: space-between; }
+.mascot-switch {
+  width: 28px; height: 16px; border-radius: 999px; background: var(--border);
+  position: relative; flex-shrink: 0; margin-left: auto;
+  transition: background .2s ease-out;
+}
+.mascot-switch::after {
+  content: '';
+  position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--text);
+  transition: transform .2s ease-out;
+}
+#mascotToggle.mascot-on .mascot-switch { background: var(--teal); }
+#mascotToggle.mascot-on .mascot-switch::after { transform: translateX(12px); background: var(--bg-deep); }

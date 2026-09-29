@@ -80,6 +80,18 @@ function apiUpdateMeta(name, payload) {
   });
 }
 
+function apiGetBotConfig(name) {
+  return fetchJson(`/api/bots/${name}/config`);
+}
+
+function apiSaveBotConfig(name, payload) {
+  return fetchJson(`/api/bots/${name}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 function apiPullImage() {
   return fetchJson('/api/image/pull', { method: 'POST' });
 }

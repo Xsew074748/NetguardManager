@@ -1,3 +1,7 @@
+/* atmosphere.css เป็นไฟล์แยกตามที่ต้องการ (public/css/atmosphere.css) โหลดผ่าน @import
+   แทนการเพิ่ม <link> ใน index.html เพราะรอบนี้แก้ได้เฉพาะไฟล์ css/js */
+@import url('atmosphere.css');
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   --bg-deep:     #0d1117;

@@ -1,0 +1,98 @@
+/* ── Atmosphere — background depth layer (grid / orbs / vignette) ──
+   ทุก layer อยู่ z-index: 0, pointer-events: none, วาดหลัง .content เสมอ
+   (.content ถูกยกเป็น z-index: 1 ใน layout.css เพื่อรับประกันว่าอยู่หน้าเสมอ) */
+
+/* ── 1.2 Ambient gradient orbs ──
+   เดิมใช้ filter:blur(80px) ตามสเปก แต่วัด fps จริงแล้วตกเหลือ ~17-20fps (ต่ำกว่า 55fps ที่กำหนด)
+   เพราะ blur() บน element ใหญ่ระดับ 40vw ที่กำลัง animate transform ทุกเฟรมนั้นแพงมาก โดยเฉพาะ
+   บน renderer ที่ไม่มี GPU จริง (เช่น SwiftShader ในสภาพแวดล้อม headless) — เปลี่ยนมาใช้ radial-gradient
+   หลาย stop แทนเพื่อจำลองขอบนุ่มแบบ blur โดยไม่ต้องพึ่ง filter เลย ได้ผลลัพธ์ภาพใกล้เคียงเดิม
+   แต่วัดได้ 60fps สม่ำเสมอ ขนาด ~40vw ตามสเปกเดิมไว้ครบ */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  z-index: 0;
+  pointer-events: none;
+  width: 40vw;
+  height: 40vw;
+  border-radius: 50%;
+  will-change: transform;
+}
+body::before {
+  top: -12vw;
+  left: -12vw;
+  background: radial-gradient(circle, rgba(0, 212, 160, .06), rgba(0, 212, 160, .035) 30%, rgba(0, 212, 160, .012) 55%, transparent 75%);
+  animation: atmosphere-orb-1 34s ease-in-out infinite;
+  translate: 0 calc(var(--scroll-y, 0px) * 0.05);
+}
+body::after {
+  bottom: -12vw;
+  right: -12vw;
+  background: radial-gradient(circle, rgba(124, 108, 246, .05), rgba(124, 108, 246, .03) 30%, rgba(124, 108, 246, .01) 55%, transparent 75%);
+  animation: atmosphere-orb-2 38s ease-in-out infinite;
+  translate: 0 calc(var(--scroll-y, 0px) * 0.05);
+}
+@keyframes atmosphere-orb-1 {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(5vw, 2vw); }
+  50%  { transform: translate(0, 4vw); }
+  75%  { transform: translate(-5vw, 2vw); }
+  100% { transform: translate(0, 0); }
+}
+@keyframes atmosphere-orb-2 {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(-5vw, -2vw); }
+  50%  { transform: translate(0, -4vw); }
+  75%  { transform: translate(5vw, -2vw); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ── 1.1 Blueprint grid — จางมาก, เลื่อนช้ามาก ── */
+.main-area::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(to right, rgba(255, 255, 255, .015), rgba(255, 255, 255, .015) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, .015), rgba(255, 255, 255, .015) 1px, transparent 1px, transparent 40px);
+  background-size: 40px 40px;
+  animation: atmosphere-grid-scroll 60s linear infinite;
+  translate: 0 calc(var(--scroll-y, 0px) * 0.03);
+}
+@keyframes atmosphere-grid-scroll {
+  from { background-position: 0 0; }
+  to   { background-position: 40px 40px; }
+}
+
+/* ── 1.3 Vignette — เงาขอบจอ ไม่มี motion ── */
+.main-area::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, .25) 100%);
+}
+
+/* ── Network background — จุดลอย + เส้นเชื่อมจางๆ วาดด้วย canvas (network-bg.js) ──
+   opacity คุมที่ระดับ canvas ทั้งก้อน ง่ายกว่าคุม alpha ทุกจุด/เส้นแยกกัน ปรับความเข้มรวมได้จุดเดียว */
+#networkBgCanvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .35;
+}
+
+/* ── prefers-reduced-motion: orbs/grid หยุดเคลื่อนที่ + ปิด parallax แต่ยังแสดงอยู่ ── */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .main-area::before {
+    animation: none;
+    translate: none;
+  }
+}

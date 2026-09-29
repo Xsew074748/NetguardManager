@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/theme.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/mascot.css">
 </head>
 <body>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -30,6 +31,11 @@
       <span class="nav-icon">&#9881;</span><span class="nav-item-text">Settings</span>
     </button>
   </nav>
+  <button class="nav-item" id="mascotToggle" type="button" aria-pressed="true">
+    <span class="nav-icon">&#129302;</span>
+    <span class="nav-item-text">มาสคอต</span>
+    <span class="mascot-switch"></span>
+  </button>
   <div class="sidebar-footer">
     <div class="sidebar-user">Admin</div>
     <button class="btn btn-ghost" id="logoutBtn"><span class="btn-icon-glyph">&#9211;</span><span class="btn-text">ออกจากระบบ</span></button>
@@ -247,6 +253,25 @@
   </div>
 </div>
 
+<!-- Bot config modal (.env) -->
+<div class="modal-overlay" id="configModal">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h3 id="configModalTitle">ตั้งค่า</h3>
+      <button class="modal-close" id="configModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-error" id="configModalError"></div>
+      <div id="configModalBody">Loading...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="configCancelBtn">ยกเลิก</button>
+      <button class="btn btn-secondary" id="configSaveBtn">บันทึก</button>
+      <button class="btn btn-teal" id="configSaveRestartBtn">บันทึกและ Restart bot</button>
+    </div>
+  </div>
+</div>
+
 <!-- Remove confirm modal -->
 <div class="modal-overlay" id="removeModal">
   <div class="modal">
@@ -281,9 +306,37 @@
 
 <div class="toast-container" id="toastContainer"></div>
 
+<!-- Mascot -->
+<svg id="mascotSvg" class="mascot-svg hidden" viewBox="0 0 64 74" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <g id="mascotFacing" class="mascot-facing">
+    <g id="mascotPosture" class="mascot-posture">
+      <rect id="legLeft" class="mascot-leg leg-a" x="21" y="62" width="8" height="12" rx="3"></rect>
+      <rect id="legRight" class="mascot-leg leg-b" x="35" y="62" width="8" height="12" rx="3"></rect>
+
+      <rect id="armLeft" class="mascot-arm" x="6" y="42" width="8" height="18" rx="4"></rect>
+      <rect id="armRight" class="mascot-arm" x="50" y="42" width="8" height="18" rx="4"></rect>
+
+      <rect id="mascotBody" class="mascot-body" x="16" y="38" width="32" height="26" rx="7"></rect>
+      <rect id="chestScreen" class="mascot-chest" x="24" y="46" width="16" height="10" rx="3"></rect>
+
+      <rect id="mascotHead" class="mascot-head" x="14" y="14" width="36" height="24" rx="8"></rect>
+      <line class="mascot-antenna-line" x1="32" y1="14" x2="32" y2="7"></line>
+      <circle id="antennaDot" class="mascot-antenna-dot" cx="32" cy="4" r="3"></circle>
+
+      <circle id="eyeLeft" class="mascot-eye" cx="25" cy="26" r="3.2"></circle>
+      <circle id="eyeRight" class="mascot-eye" cx="39" cy="26" r="3.2"></circle>
+
+      <text id="mascotAlert" class="mascot-alert" x="46" y="10">!</text>
+      <text id="mascotZzz" class="mascot-zzz" x="44" y="8">z</text>
+    </g>
+  </g>
+</svg>
+
 <script src="js/api.js"></script>
 <script src="js/render.js"></script>
 <script src="js/modals.js"></script>
 <script src="js/app.js"></script>
+<script src="js/mascot.js"></script>
+<script src="js/network-bg.js"></script>
 </body>
 </html>

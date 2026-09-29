@@ -5,7 +5,10 @@
 .btn-teal { background: var(--teal); color: var(--bg-deep); }
 .btn-teal:hover:not(:disabled) { background: var(--teal-dim); }
 
-.card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 2px 8px rgba(0, 0, 0, .1);
+}
 table { width: 100%; border-collapse: collapse; }
 thead th {
   text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -14,7 +17,7 @@ thead th {
 }
 tbody td { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: var(--bg-elevated); transition: background .15s; }
+tbody tr:hover { background: var(--bg-elevated); box-shadow: inset 2px 0 0 var(--teal); transition: background .15s, box-shadow .15s; }
 tbody tr.clickable-row:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: calc(var(--i, 0) * 30ms); }
 @keyframes row-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -41,8 +44,7 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .bot-name { font-weight: 600; color: var(--text); }
 .bot-cell-company { font-weight: 600; color: var(--text); }
 .bot-cell-name { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.port-link { color: var(--teal); text-decoration: none; font-weight: 600; }
-.port-link:hover { text-decoration: underline; }
+.port-value { color: var(--text); font-weight: 600; }
 
 .status { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 13px; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
@@ -164,7 +166,8 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 @keyframes modal-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .modal {
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 440px;
-  max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  max-height: 85vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .6), 0 0 0 1px rgba(0, 212, 160, .08);
 }
 .modal.modal-wide { max-width: 720px; }
 .modal-header {
@@ -191,7 +194,7 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .field:last-child { margin-bottom: 0; }
 .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
 .field-hint { font-size: 12px; color: var(--text-dim); margin-top: 5px; }
-.field input[type=text], .field input[type=number], .field input[type=date], .field textarea {
+.field input[type=text], .field input[type=number], .field input[type=date], .field input[type=password], .field textarea {
   width: 100%; padding: 10px 13px; border: 1.5px solid var(--border); background: var(--bg-deep); color: var(--text);
   border-radius: 8px; font-size: 14px; font-family: var(--font); outline: none;
   transition: border-color .2s, box-shadow .2s;
@@ -199,10 +202,43 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .field textarea { resize: vertical; min-height: 70px; }
 .field input:focus, .field textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,212,160,.15); }
 .field input.error, .field textarea.error { border-color: var(--red); }
+.field input:disabled { opacity: .55; cursor: not-allowed; }
 .field-readonly { font-size: 13.5px; color: var(--text-dim); padding: 8px 0; }
 
 .checkbox-row { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--text); }
 .checkbox-row input { width: 16px; height: 16px; accent-color: var(--red); }
+
+/* ── Secret input (password field + show/hide + clear) ── */
+.input-wrap { position: relative; }
+.input-wrap input { padding-right: 40px; }
+.toggle-vis {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--text-dim);
+  font-size: 15px; padding: 4px; line-height: 1;
+}
+.toggle-vis:hover { color: var(--text); }
+.btn-clear-secret {
+  background: none; border: none; color: var(--text-dim); font-size: 12px;
+  cursor: pointer; padding: 5px 0 0; text-decoration: underline;
+}
+.btn-clear-secret:hover { color: var(--red); }
+
+/* ── Bot config modal (.env) — accordion sections ── */
+.config-section { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.config-section:last-of-type { margin-bottom: 0; }
+.config-section summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 14px; cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 700; color: var(--text);
+  background: var(--bg-elevated);
+}
+.config-section summary::-webkit-details-marker { display: none; }
+.config-section summary::before { content: '▸'; font-size: 11px; color: var(--text-dim); margin-right: 8px; transition: transform .15s; }
+.config-section[open] summary::before { transform: rotate(90deg); }
+.config-section-title { flex: 1; display: flex; align-items: center; }
+.config-section-body { padding: 16px 14px; }
+.config-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; white-space: nowrap; }
+.config-badge.ok { background: rgba(0,212,160,.15); color: var(--teal); }
+.config-badge.pending { background: rgba(139,150,168,.15); color: var(--text-dim); }
 
 /* ── Guide accordion ── */
 details.guide-accordion { margin-top: 8px; font-size: 12.5px; }

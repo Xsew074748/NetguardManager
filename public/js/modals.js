@@ -48,6 +48,7 @@ function onActionClick(btn) {
 
   if (action === 'log') return openLogModal(`Log — ${name}`, id, false);
   if (action === 'edit-meta') return openEditMetaModal(name);
+  if (action === 'config') return openConfigModal(name, id);
   if (action === 'remove') return openRemoveModal(id, name);
   if (action === 'tunnel-add') return openAttachTunnelModal(name);
   if (action === 'tunnel-log') return openLogModal(`Tunnel Log — ${name}`, name, true);
@@ -273,6 +274,255 @@ async function submitEditMeta() {
   } finally {
     editMetaSubmitBtn.disabled = false;
     editMetaSubmitBtn.textContent = 'บันทึก';
+  }
+}
+
+// ── Bot config modal (.env) ──
+const CONFIG_GROUPS = [
+  {
+    key: 'line',
+    label: 'LINE',
+    fields: [
+      { key: 'LINE_CHANNEL_SECRET', label: 'Channel Secret', secret: true },
+      { key: 'LINE_CHANNEL_ACCESS_TOKEN', label: 'Channel Access Token', secret: true },
+    ],
+    guide: `
+      <ol>
+        <li>เปิด <a href="https://developers.line.biz" target="_blank" rel="noopener">developers.line.biz</a> → เลือก Provider → เลือก Channel</li>
+        <li>แท็บ "Basic settings" → Channel secret</li>
+        <li>แท็บ "Messaging API" → Channel access token (long-lived) → กด Issue ถ้ายังไม่มี</li>
+      </ol>
+    `,
+  },
+  {
+    key: 'zabbix',
+    label: 'Zabbix',
+    fields: [
+      { key: 'ZABBIX_URL', label: 'Zabbix URL', url: true, placeholder: 'https://zabbix.example.com' },
+      { key: 'ZABBIX_API_TOKEN', label: 'API Token', secret: true },
+    ],
+    guide: `
+      <ol>
+        <li>URL ของ Zabbix web interface เช่น https://192.168.1.10 (ไม่ต้องใส่ /api_jsonrpc.php)</li>
+        <li>Login Zabbix → คลิกชื่อ User มุมบนขวา → "User settings" → แท็บ "API tokens"</li>
+        <li>คลิก "Create API token" → ตั้งชื่อ → Copy Token ที่แสดง (แสดงครั้งเดียว!)</li>
+      </ol>
+    `,
+  },
+  {
+    key: 'omada',
+    label: 'Omada',
+    fields: [
+      { key: 'OMADA_URL', label: 'Controller URL', url: true, placeholder: 'https://omada.example.com:8043' },
+      { key: 'OMADA_OMADAC_ID', label: 'Omadac ID' },
+      { key: 'OMADA_CLIENT_ID', label: 'Client ID' },
+      { key: 'OMADA_CLIENT_SECRET', label: 'Client Secret', secret: true },
+      { key: 'OMADA_SITE_ID', label: 'Site ID', placeholder: 'default' },
+    ],
+    guide: `
+      <ol>
+        <li>Cloud: https://&lt;region&gt;-omada-northbound.tplinkcloud.com &nbsp;/&nbsp; Local: https://&lt;ip&gt;:8043</li>
+        <li>Login Omada → ดู URL จะเห็น /{omadacId}/ ต่อจาก port</li>
+        <li>Settings → Platform Integration → Open API → Create → ตั้งชื่อ → Role: Administrator → เลือก Site → Save → copy Client ID/Secret</li>
+        <li>Site ID: Settings → Open API → ดู URL หลัง /sites/ หรือใช้ "default"</li>
+      </ol>
+    `,
+  },
+  {
+    key: 'hikcentral',
+    label: 'HikCentral',
+    fields: [
+      { key: 'HIKCENTRAL_URL', label: 'HikCentral URL', url: true, placeholder: 'https://hikcentral.example.com' },
+      { key: 'HIKCENTRAL_APP_KEY', label: 'App Key (AK)' },
+      { key: 'HIKCENTRAL_APP_SECRET', label: 'App Secret (SK)', secret: true },
+    ],
+    guide: `
+      <ol>
+        <li>ติดตั้ง Artemis OpenAPI บน HikCentral Server จาก <a href="https://tpp.hikvision.com/tpp/Resource" target="_blank" rel="noopener">tpp.hikvision.com/tpp/Resource</a></li>
+        <li>เปิด Artemis Web ที่ http://[server]:9017 → Login → User Management → สร้าง User → Copy AppKey/AppSecret</li>
+        <li>Authorized API → เพิ่ม API ที่ต้องการ</li>
+      </ol>
+    `,
+  },
+  {
+    key: 'ai',
+    label: 'Claude AI',
+    fields: [
+      { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key', secret: true },
+    ],
+    guide: `
+      <ol>
+        <li>เปิด <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a> → Login → "API Keys" → Create Key</li>
+        <li>Copy Key ที่ได้ (แสดงครั้งเดียว!)</li>
+      </ol>
+    `,
+  },
+];
+const CONFIG_ALL_FIELDS = CONFIG_GROUPS.flatMap((g) => g.fields);
+
+let configTarget = null;
+let configOriginal = null;
+
+function configFieldIsSet(cfg, field) {
+  if (field.secret) return !!(cfg[field.key] && cfg[field.key].set);
+  return !!(cfg[field.key] && cfg[field.key].trim());
+}
+
+function configGroupDone(cfg, group) {
+  return group.fields.every((f) => configFieldIsSet(cfg, f));
+}
+
+function renderConfigField(cfg, f) {
+  const inputId = `cfg_${f.key}`;
+  if (f.secret) {
+    const isSet = cfg[f.key] && cfg[f.key].set;
+    const placeholder = isSet ? `${cfg[f.key].hint} (ตั้งค่าแล้ว เว้นว่างถ้าไม่แก้)` : '';
+    return `
+      <div class="field">
+        <label for="${inputId}">${f.label}</label>
+        <div class="input-wrap">
+          <input type="password" id="${inputId}" data-field="${f.key}" autocomplete="off" placeholder="${escapeHtml(placeholder)}">
+          <button type="button" class="toggle-vis" data-toggle-vis="${inputId}" title="แสดง/ซ่อน" tabindex="-1">&#128065;</button>
+        </div>
+        ${isSet ? `<button type="button" class="btn-clear-secret" data-clear-field="${f.key}">ล้างค่า</button>` : ''}
+      </div>
+    `;
+  }
+  const val = escapeHtml(cfg[f.key] || '');
+  return `
+    <div class="field">
+      <label for="${inputId}">${f.label}</label>
+      <input type="text" id="${inputId}" data-field="${f.key}" autocomplete="off" value="${val}" placeholder="${escapeHtml(f.placeholder || '')}">
+    </div>
+  `;
+}
+
+function renderConfigSections(cfg) {
+  return CONFIG_GROUPS.map((group, i) => {
+    const done = configGroupDone(cfg, group);
+    return `
+      <details class="config-section"${i === 0 ? ' open' : ''}>
+        <summary>
+          <span class="config-section-title">${group.label}</span>
+          <span class="config-badge ${done ? 'ok' : 'pending'}">${done ? 'ตั้งค่าแล้ว ✓' : 'ยังไม่ตั้ง'}</span>
+        </summary>
+        <div class="config-section-body">
+          ${group.fields.map((f) => renderConfigField(cfg, f)).join('')}
+          <details class="guide-accordion">
+            <summary>วิธีหาค่านี้ ?</summary>
+            ${group.guide}
+          </details>
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+async function openConfigModal(name, id) {
+  configTarget = { name, id };
+  configOriginal = null;
+  configModalTitle.textContent = `ตั้งค่า — ${name}`;
+  configModalError.classList.remove('show');
+  configModalBody.innerHTML = 'Loading...';
+  configModal.classList.add('show');
+  configSaveBtn.disabled = false;
+  configSaveBtn.textContent = 'บันทึก';
+  configSaveRestartBtn.disabled = false;
+  configSaveRestartBtn.textContent = 'บันทึกและ Restart bot';
+  try {
+    const cfg = await apiGetBotConfig(name);
+    configOriginal = cfg;
+    configModalBody.innerHTML = renderConfigSections(cfg);
+  } catch (err) {
+    configModalBody.innerHTML = `<div class="form-error show">โหลดข้อมูลไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeConfigModal() {
+  configModal.classList.remove('show');
+  // ล้าง DOM ทั้งก้อนตอนปิด — กัน secret ที่พิมพ์ไว้ค้างอยู่ใน input หลังปิด modal
+  configModalBody.innerHTML = '';
+  configTarget = null;
+  configOriginal = null;
+}
+
+function toggleClearSecret(btn) {
+  const key = btn.dataset.clearField;
+  const input = configModalBody.querySelector(`input[data-field="${key}"]`);
+  if (!input) return;
+  const pending = input.dataset.pendingClear === '1';
+  if (pending) {
+    input.dataset.pendingClear = '';
+    input.disabled = false;
+    const original = configOriginal && configOriginal[key];
+    input.placeholder = original && original.set ? `${original.hint} (ตั้งค่าแล้ว เว้นว่างถ้าไม่แก้)` : '';
+    btn.textContent = 'ล้างค่า';
+  } else {
+    input.value = '';
+    input.dataset.pendingClear = '1';
+    input.disabled = true;
+    input.placeholder = '(จะลบค่านี้เมื่อบันทึก)';
+    btn.textContent = 'เลิกล้างค่า';
+  }
+}
+
+function buildConfigPayload() {
+  const payload = {};
+  CONFIG_ALL_FIELDS.forEach((f) => {
+    const input = configModalBody.querySelector(`input[data-field="${f.key}"]`);
+    if (!input) return;
+    if (f.secret) {
+      if (input.dataset.pendingClear === '1') {
+        payload[f.key] = null;
+        return;
+      }
+      if (input.value !== '') payload[f.key] = input.value;
+      return;
+    }
+    const v = input.value.trim();
+    const orig = (configOriginal && configOriginal[f.key]) || '';
+    if (v !== orig) payload[f.key] = v;
+  });
+  return payload;
+}
+
+async function submitConfigModal(restart) {
+  if (!configTarget) return;
+  configModalError.classList.remove('show');
+
+  const payload = buildConfigPayload();
+  if (Object.keys(payload).length === 0 && !restart) {
+    showToast('ไม่มีการเปลี่ยนแปลงให้บันทึก', 'info');
+    return;
+  }
+
+  const btn = restart ? configSaveRestartBtn : configSaveBtn;
+  const otherBtn = restart ? configSaveBtn : configSaveRestartBtn;
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  otherBtn.disabled = true;
+  btn.textContent = 'กำลังบันทึก...';
+
+  try {
+    if (Object.keys(payload).length > 0) {
+      await apiSaveBotConfig(configTarget.name, payload);
+    }
+    if (restart) {
+      btn.textContent = 'กำลัง Restart...';
+      await apiBotAction(configTarget.id, 'restart');
+      showToast(`บันทึกและ Restart "${configTarget.name}" สำเร็จ`, 'success');
+    } else {
+      showToast(`บันทึกการตั้งค่า "${configTarget.name}" สำเร็จ — ค่าใหม่จะมีผลหลัง Restart`, 'success');
+    }
+    closeConfigModal();
+    loadBots();
+  } catch (err) {
+    configModalError.textContent = err.message;
+    configModalError.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    otherBtn.disabled = false;
+    btn.textContent = originalText;
   }
 }
 

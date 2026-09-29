@@ -2,6 +2,7 @@ const express = require('express');
 const guard = require('../middleware/guard');
 const dockerService = require('../services/docker');
 const metaService = require('../services/meta');
+const envConfigService = require('../services/env-config');
 const statsDb = require('../services/stats-db');
 const logger = require('../services/logger');
 
@@ -149,6 +150,27 @@ router.put('/bots/:name/meta', async (req, res) => {
     res.json(meta);
   } catch (err) {
     handleError(res, err, `Failed to update meta for ${req.params.name}`);
+  }
+});
+
+router.get('/bots/:name/config', async (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const cfg = envConfigService.readEnvConfig(req.params.name);
+    res.json(cfg);
+  } catch (err) {
+    handleError(res, err, `Failed to read config for ${req.params.name}`);
+  }
+});
+
+router.put('/bots/:name/config', async (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const result = envConfigService.writeEnvConfig(req.params.name, req.body || {});
+    logger.info(`config updated for ${req.params.name}: ${result.changed.join(', ')}`);
+    res.json({ ok: true, changed: result.changed });
+  } catch (err) {
+    handleError(res, err, `Failed to update config for ${req.params.name}`);
   }
 });
 

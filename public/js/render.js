@@ -156,9 +156,7 @@ function botCell(bot, name) {
 }
 
 function infoCell(bot) {
-  const portPart = bot.port
-    ? `<a class="port-link" href="http://localhost:${bot.port}/setup" target="_blank" rel="noopener">${bot.port}</a>`
-    : '-';
+  const portPart = bot.port ? `<span class="port-value">${bot.port}</span>` : '-';
   let monitorsPart = '-';
   if (bot.state === 'running') {
     monitorsPart = bot.health && bot.health.ok
@@ -243,6 +241,7 @@ function rowTemplate(bot, animIndex) {
               <button class="kebab-item" role="menuitem" data-action="restart" data-id="${id}">&#8635; Restart</button>
               <button class="kebab-item" role="menuitem" data-action="log" data-id="${id}" data-name="${n}">&#128196; ดู Log</button>
               <button class="kebab-item" role="menuitem" data-action="edit-meta" data-name="${n}">&#9998; แก้ไขข้อมูลลูกค้า</button>
+              <button class="kebab-item" role="menuitem" data-action="config" data-id="${id}" data-name="${n}">&#9881; ตั้งค่า (.env)</button>
               ${!hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-add" data-name="${n}">&#128279; เพิ่ม Tunnel</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-log" data-name="${n}">&#128279; ดู Tunnel Log</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-remove" data-name="${n}">&#128279; ลบ Tunnel</button>` : ''}

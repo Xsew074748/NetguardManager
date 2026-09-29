@@ -44,6 +44,13 @@ const editNote = document.getElementById('editNote');
 const editCreatedAtDisplay = document.getElementById('editCreatedAtDisplay');
 const editMetaSubmitBtn = document.getElementById('editMetaSubmitBtn');
 
+const configModal = document.getElementById('configModal');
+const configModalTitle = document.getElementById('configModalTitle');
+const configModalError = document.getElementById('configModalError');
+const configModalBody = document.getElementById('configModalBody');
+const configSaveBtn = document.getElementById('configSaveBtn');
+const configSaveRestartBtn = document.getElementById('configSaveRestartBtn');
+
 const statsModal = document.getElementById('statsModal');
 const statsModalTitle = document.getElementById('statsModalTitle');
 const statsModalBody = document.getElementById('statsModalBody');
@@ -155,6 +162,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   closeAllKebabs();
+  if (configModal.classList.contains('show')) closeConfigModal();
   document.querySelectorAll('.modal-overlay.show').forEach((m) => m.classList.remove('show'));
 });
 
@@ -188,6 +196,31 @@ editMetaModal.addEventListener('click', (e) => {
   if (e.target === editMetaModal) closeEditMetaModal();
 });
 editMetaSubmitBtn.addEventListener('click', submitEditMeta);
+
+// ── Bot config modal (.env) ──
+document.getElementById('configModalClose').addEventListener('click', closeConfigModal);
+document.getElementById('configCancelBtn').addEventListener('click', closeConfigModal);
+configModal.addEventListener('click', (e) => {
+  if (e.target === configModal) closeConfigModal();
+});
+configSaveBtn.addEventListener('click', () => submitConfigModal(false));
+configSaveRestartBtn.addEventListener('click', () => submitConfigModal(true));
+configModalBody.addEventListener('click', (e) => {
+  const toggleBtn = e.target.closest('[data-toggle-vis]');
+  if (toggleBtn) {
+    const input = document.getElementById(toggleBtn.dataset.toggleVis);
+    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+    return;
+  }
+  const clearBtn = e.target.closest('[data-clear-field]');
+  if (clearBtn) toggleClearSecret(clearBtn);
+});
+configModalBody.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input')) {
+    e.preventDefault();
+    submitConfigModal(false);
+  }
+});
 
 // ── Remove confirm modal ──
 document.getElementById('removeModalClose').addEventListener('click', closeRemoveModal);
@@ -227,6 +260,35 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && sidebar.classList.contains('show')) closeSidebar();
 });
 
+// ── Atmosphere parallax (background grid/orbs เลื่อนช้ากว่า content ตอน scroll) ──
+// อยู่ในไฟล์นี้แทนไฟล์แยก เพราะรอบนี้แก้ได้เฉพาะไฟล์ css/js — เพิ่ม <script> ใหม่ใน index.html ไม่ได้
+function initAtmosphereParallax() {
+  if (typeof prefersReducedMotion === 'function' && prefersReducedMotion()) return; // parallax คือ motion — ปิดถ้า reduced-motion
+
+  const mainArea = document.querySelector('.main-area');
+  if (!mainArea) return;
+
+  let ticking = false;
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      // อ่าน scrollTop ครั้งเดียวต่อเฟรม (throttle ผ่าน ticking flag) ไม่อ่านซ้ำใน loop
+      document.documentElement.style.setProperty('--scroll-y', `${mainArea.scrollTop}px`);
+      ticking = false;
+    });
+  }
+  mainArea.addEventListener('scroll', onScroll, { passive: true });
+}
+
 // ── Init ──
 loadBots();
-refreshTimer = setInterval(loadBots, 10000);
+// เรียกผ่าน arrow function เสมอ (ไม่ใช่ setInterval(loadBots, ...) ตรงๆ) เพื่อให้ mascot.js
+// ที่โหลดทีหลังและ wrap window.loadBots ไว้ ทำงานกับ auto-refresh ได้ด้วย ไม่ใช่แค่ตอนกดปุ่ม
+refreshTimer = setInterval(() => loadBots(), 10000);
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof initMascot === 'function') initMascot();
+  if (typeof initNetworkBg === 'function') initNetworkBg();
+  initAtmosphereParallax();
+});

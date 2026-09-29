@@ -77,7 +77,9 @@ function setEnvValue(envPath, key, value) {
   } else {
     content += `${content.endsWith('\n') ? '' : '\n'}${key}=${value}\n`;
   }
-  fs.writeFileSync(envPath, content);
+  const tmpPath = `${envPath}.tmp`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, envPath);
 }
 
 function isPortFree(port) {
@@ -513,4 +515,5 @@ module.exports = {
   attachTunnel,
   detachTunnel,
   isValidBotName,
+  setEnvValue,
 };
