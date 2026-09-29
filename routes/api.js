@@ -48,6 +48,17 @@ router.get('/bots/:id/health', async (req, res) => {
   }
 });
 
+// live snapshot จากตัว bot เอง (aiProvider, monitors, partial, failed) — คนละตัวกับ
+// /bots/:name/stats/summary|daily|samples ด้านล่างที่เป็นสถิติ uptime ย้อนหลังจาก SQLite
+router.get('/bots/:id/live-stats', async (req, res) => {
+  try {
+    const stats = await dockerService.getBotStats(req.params.id);
+    res.json(stats);
+  } catch (err) {
+    handleError(res, err, `Failed to get live stats for ${req.params.id}`);
+  }
+});
+
 router.post('/bots', async (req, res) => {
   try {
     const { name, port, tunnelToken, companyName } = req.body || {};

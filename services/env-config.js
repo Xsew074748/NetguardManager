@@ -21,7 +21,10 @@ const FIELDS = {
   HIKCENTRAL_URL: { url: true },
   HIKCENTRAL_APP_KEY: {},
   HIKCENTRAL_APP_SECRET: { secret: true },
+  AI_PROVIDER: { enumValues: ['claude', 'gemini', 'openai'], default: 'claude' },
   ANTHROPIC_API_KEY: { secret: true },
+  GEMINI_API_KEY: { secret: true },
+  OPENAI_API_KEY: { secret: true },
 };
 
 function validationError(message, statusCode = 400) {
@@ -67,7 +70,7 @@ function readEnvConfig(botName) {
     if (meta.secret) {
       out[key] = raw ? { set: true, hint: `••••${raw.slice(-4)}` } : { set: false, hint: '' };
     } else {
-      out[key] = raw;
+      out[key] = raw || (meta.default !== undefined ? meta.default : '');
     }
   }
   return out;
@@ -106,6 +109,10 @@ function writeEnvConfig(botName, updates) {
 
     if (meta.url && cleaned !== '' && !/^https?:\/\//i.test(cleaned)) {
       throw validationError(`Field "${key}" must start with http:// or https://`);
+    }
+
+    if (meta.enumValues && cleaned !== '' && !meta.enumValues.includes(cleaned)) {
+      throw validationError(`Field "${key}" must be one of: ${meta.enumValues.join(', ')}`);
     }
 
     dockerService.setEnvValue(filePath, key, cleaned);

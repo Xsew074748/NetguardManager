@@ -346,14 +346,24 @@ const CONFIG_GROUPS = [
   },
   {
     key: 'ai',
-    label: 'Claude AI',
+    label: 'AI Provider',
     fields: [
-      { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key', secret: true },
+      { key: 'AI_PROVIDER', label: 'AI Provider', select: true, options: [
+        { value: 'claude', label: 'Claude (Anthropic)' },
+        { value: 'gemini', label: 'Gemini (Google)' },
+        { value: 'openai', label: 'GPT (OpenAI)' },
+      ] },
+      { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key', secret: true, providerFor: 'claude' },
+      { key: 'GEMINI_API_KEY', label: 'Gemini API Key', secret: true, providerFor: 'gemini' },
+      { key: 'OPENAI_API_KEY', label: 'OpenAI API Key', secret: true, providerFor: 'openai' },
     ],
     guide: `
       <ol>
-        <li>เปิด <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a> → Login → "API Keys" → Create Key</li>
-        <li>Copy Key ที่ได้ (แสดงครั้งเดียว!)</li>
+        <li>เลือก Provider ที่ต้องการใช้ — ถ้าไม่ตั้งค่าจะใช้ Claude เป็นค่าเริ่มต้นเสมอ</li>
+        <li>ถ้าเลือก Gemini/GPT แต่ไม่ได้ใส่ API key ของเจ้านั้น ระบบจะ fallback กลับไปใช้ Claude อัตโนมัติ (ต้องมี Anthropic API Key ไว้เสมอ)</li>
+        <li>Claude: <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a></li>
+        <li>Gemini: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></li>
+        <li>OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a></li>
       </ol>
     `,
   },
@@ -369,16 +379,41 @@ function configFieldIsSet(cfg, field) {
 }
 
 function configGroupDone(cfg, group) {
+  // กลุ่ม AI: แค่มี ANTHROPIC_API_KEY (fallback บังคับ) ก็ถือว่าตั้งค่าแล้ว —
+  // Gemini/OpenAI key เป็น optional ไม่ต้องครบทุก field เหมือนกลุ่มอื่น
+  if (group.key === 'ai') {
+    return configFieldIsSet(cfg, { key: 'ANTHROPIC_API_KEY', secret: true });
+  }
   return group.fields.every((f) => configFieldIsSet(cfg, f));
 }
 
 function renderConfigField(cfg, f) {
   const inputId = `cfg_${f.key}`;
+  // field ที่ผูกกับ provider ตัวใดตัวหนึ่ง (providerFor) ซ่อนไว้ก่อนถ้าไม่ตรงกับ
+  // AI_PROVIDER ปัจจุบัน — ซ่อนด้วย CSS (field-hidden) เท่านั้น ไม่ตัดออกจาก DOM
+  // เพื่อให้ค่าที่กรอกไว้ก่อนสลับ provider ยังอยู่ และ buildConfigPayload อ่านได้ปกติ
+  const providerFor = f.providerFor || '';
+  const currentProvider = cfg.AI_PROVIDER || 'claude';
+  const hiddenClass = (providerFor && providerFor !== currentProvider) ? ' field-hidden' : '';
+  const providerAttr = ` data-provider-for="${providerFor}"`;
+
+  if (f.select) {
+    const current = cfg[f.key] || '';
+    const options = f.options.map((o) => `<option value="${escapeHtml(o.value)}"${current === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+    return `
+      <div class="field${hiddenClass}"${providerAttr}>
+        <label for="${inputId}">${f.label}</label>
+        <select id="${inputId}" data-field="${f.key}">
+          ${options}
+        </select>
+      </div>
+    `;
+  }
   if (f.secret) {
     const isSet = cfg[f.key] && cfg[f.key].set;
     const placeholder = isSet ? `${cfg[f.key].hint} (ตั้งค่าแล้ว เว้นว่างถ้าไม่แก้)` : '';
     return `
-      <div class="field">
+      <div class="field${hiddenClass}"${providerAttr}>
         <label for="${inputId}">${f.label}</label>
         <div class="input-wrap">
           <input type="password" id="${inputId}" data-field="${f.key}" autocomplete="off" placeholder="${escapeHtml(placeholder)}">
@@ -390,11 +425,21 @@ function renderConfigField(cfg, f) {
   }
   const val = escapeHtml(cfg[f.key] || '');
   return `
-    <div class="field">
+    <div class="field${hiddenClass}"${providerAttr}>
       <label for="${inputId}">${f.label}</label>
       <input type="text" id="${inputId}" data-field="${f.key}" autocomplete="off" value="${val}" placeholder="${escapeHtml(f.placeholder || '')}">
     </div>
   `;
+}
+
+// เรียกตอน AI_PROVIDER dropdown เปลี่ยนค่า — toggle field-hidden ตาม provider ใหม่
+// (ไม่ reload modal ทั้งก้อน แค่ toggle class บน field ที่มี data-provider-for)
+function applyProviderFieldVisibility(provider) {
+  configModalBody.querySelectorAll('[data-provider-for]').forEach((el) => {
+    const wantedFor = el.dataset.providerFor;
+    if (!wantedFor) return; // field ที่ไม่ได้ผูกกับ provider ไหน (data-provider-for="")
+    el.classList.toggle('field-hidden', wantedFor !== provider);
+  });
 }
 
 function renderConfigSections(cfg) {
@@ -469,7 +514,9 @@ function toggleClearSecret(btn) {
 function buildConfigPayload() {
   const payload = {};
   CONFIG_ALL_FIELDS.forEach((f) => {
-    const input = configModalBody.querySelector(`input[data-field="${f.key}"]`);
+    // ใช้ selector กว้างที่จับได้ทั้ง <input> และ <select> — ทั้งคู่มี .value
+    // เหมือนกัน ไม่ต้องแยก branch ตาม tagName
+    const input = configModalBody.querySelector(`[data-field="${f.key}"]`);
     if (!input) return;
     if (f.secret) {
       if (input.dataset.pendingClear === '1') {

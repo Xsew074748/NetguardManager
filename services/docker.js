@@ -222,6 +222,42 @@ async function getBotHealth(containerId) {
   return { ok: false, reason: lastErr ? lastErr.message : 'unreachable' };
 }
 
+async function fetchStats(host) {
+  // /stats ของ bot เองมี per-monitor timeout 4000ms (services/stats.js ของ LineBot)
+  // ยิง Zabbix/Omada/HikCentral จริงตอน cache ฝั่ง bot หมดอายุ (ทุก 60 วิ) — ถ้า monitor
+  // ไหน timeout จริง response อาจช้าเกือบ 4-5 วิ ต้องให้ timeout ฝั่งนี้ยาวกว่านั้นเสมอ
+  // ไม่งั้นจะ abort ก่อน bot ตอบทัน กลายเป็น false "ไม่มีข้อมูล" ทั้งที่ bot จะตอบได้จริง
+  const res = await fetch(`http://${host}:3000/stats`, {
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`http-${res.status}`);
+  return res.json();
+}
+
+// ดึง /stats สดจากตัว bot เอง (aiProvider, monitors, partial, failed) — คนละตัวกับ
+// /api/bots/:name/stats/summary|daily|samples ที่เป็นสถิติ uptime ย้อนหลังจาก SQLite
+// ของ manager เอง ไม่มีข้อมูลนี้เลย
+async function getBotStats(containerId) {
+  const container = docker.getContainer(containerId);
+  const detail = await container.inspect();
+
+  if (!detail.State.Running) return null;
+
+  const containerName = stripLeadingSlash(detail.Name);
+  const networks = detail.NetworkSettings.Networks || {};
+  const ip = (networks[config.botNetwork] && networks[config.botNetwork].IPAddress)
+    || Object.values(networks).map((n) => n.IPAddress).find(Boolean);
+
+  for (const host of [containerName, ip].filter(Boolean)) {
+    try {
+      return await fetchStats(host);
+    } catch (err) {
+      // ลอง host ถัดไป (ip แทน container name) ก่อนยอมแพ้
+    }
+  }
+  return null;
+}
+
 async function createBot({ name, port, tunnelToken, companyName }) {
   if (!isValidBotName(name)) {
     throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
@@ -504,6 +540,7 @@ module.exports = {
   listBots,
   getBotLogs,
   getBotHealth,
+  getBotStats,
   createBot,
   startBot,
   stopBot,

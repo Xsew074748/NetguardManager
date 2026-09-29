@@ -75,6 +75,8 @@ let lastRefreshedAt = null;
 let lastRenderedRowIds = null;
 let sparklineCharts = {};
 let sparklineCacheAt = 0;
+let liveStatsCache = {};
+let liveStatsCacheAt = 0;
 
 // ── Summary card filter (toggle) ──
 document.querySelectorAll('.summary-card').forEach((card) => {
@@ -214,6 +216,11 @@ configModalBody.addEventListener('click', (e) => {
   }
   const clearBtn = e.target.closest('[data-clear-field]');
   if (clearBtn) toggleClearSecret(clearBtn);
+});
+configModalBody.addEventListener('change', (e) => {
+  if (e.target.matches('select[data-field="AI_PROVIDER"]')) {
+    applyProviderFieldVisibility(e.target.value);
+  }
 });
 configModalBody.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('input')) {

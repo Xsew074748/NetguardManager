@@ -79,6 +79,34 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .contract-warning { background: rgba(245,166,35,.15); color: var(--amber); }
 .contract-expired { background: rgba(255,92,92,.15); color: var(--red); }
 
+/* ── AI provider badge — ต่อท้ายชื่อ/บริษัทของ bot ── */
+.ai-badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 6px; margin-left: 6px;
+  text-transform: uppercase; letter-spacing: .3px; vertical-align: middle;
+}
+.ai-badge-claude { background: rgba(0,212,160,.15); color: var(--teal); }
+.ai-badge-gemini { background: rgba(124,108,246,.15); color: var(--purple); }
+.ai-badge-openai { background: rgba(16,163,127,.15); color: #10a37f; }
+
+/* ── System connectivity dots (Zabbix/Omada/HikCentral) — คอลัมน์ "ข้อมูล" ── */
+.sys-dots-wrap { display: inline-flex; gap: 5px; margin-left: 8px; vertical-align: middle; }
+.sys-dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+}
+.sys-dot-ok {
+  background: var(--green);
+  box-shadow: 0 0 4px 1px rgba(46,204,143,.8), 0 0 8px 2px rgba(46,204,143,.4);
+}
+.sys-dot-error {
+  background: var(--red);
+  box-shadow: 0 0 4px 1px rgba(255,92,92,.8), 0 0 8px 2px rgba(255,92,92,.4);
+}
+.sys-dot-unset {
+  background: var(--border);
+  box-shadow: none;
+}
+
 .uptime-value { font-weight: 700; }
 .uptime-good { color: var(--green); }
 .uptime-warn { color: var(--amber); }
@@ -194,13 +222,14 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .field:last-child { margin-bottom: 0; }
 .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
 .field-hint { font-size: 12px; color: var(--text-dim); margin-top: 5px; }
-.field input[type=text], .field input[type=number], .field input[type=date], .field input[type=password], .field textarea {
+.field input[type=text], .field input[type=number], .field input[type=date], .field input[type=password], .field textarea, .field select {
   width: 100%; padding: 10px 13px; border: 1.5px solid var(--border); background: var(--bg-deep); color: var(--text);
   border-radius: 8px; font-size: 14px; font-family: var(--font); outline: none;
   transition: border-color .2s, box-shadow .2s;
 }
 .field textarea { resize: vertical; min-height: 70px; }
-.field input:focus, .field textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,212,160,.15); }
+.field select { cursor: pointer; }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,212,160,.15); }
 .field input.error, .field textarea.error { border-color: var(--red); }
 .field input:disabled { opacity: .55; cursor: not-allowed; }
 .field-readonly { font-size: 13.5px; color: var(--text-dim); padding: 8px 0; }
@@ -239,6 +268,7 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .config-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; white-space: nowrap; }
 .config-badge.ok { background: rgba(0,212,160,.15); color: var(--teal); }
 .config-badge.pending { background: rgba(139,150,168,.15); color: var(--text-dim); }
+.field-hidden { display: none; }
 
 /* ── Guide accordion ── */
 details.guide-accordion { margin-top: 8px; font-size: 12.5px; }

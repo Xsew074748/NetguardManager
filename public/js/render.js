@@ -140,17 +140,54 @@ function animateUptimeBar(cell) {
   });
 }
 
+// ไอคอนเล็กๆ บอก AI provider ที่ bot ตัวนี้ตั้งค่าไว้ — มาจาก /stats ของ bot เอง
+// (aiProvider เป็น null ได้ถ้า bot ไม่ running/ดึงไม่ได้/ไม่มี ANTHROPIC_API_KEY เลย)
+function aiProviderBadge(aiProvider) {
+  if (!aiProvider) return '';
+  const labels = { claude: 'Claude', gemini: 'Gemini', openai: 'GPT' };
+  const label = labels[aiProvider] || aiProvider;
+  return `<span class="ai-badge ai-badge-${aiProvider}" title="AI: ${label}">${label}</span>`;
+}
+
+// จุดสถานะ 3 ระบบ (Zabbix/Omada/HikCentral) — แยก 3 สถานะ ไม่ใช่ 2:
+//   เขียวเรือง = อยู่ใน monitors และไม่อยู่ใน failed (เชื่อมต่อสำเร็จ)
+//   แดงเรือง   = อยู่ใน monitors และอยู่ใน failed (ตั้งค่าแล้วแต่เชื่อมไม่ได้)
+//   เทาทึบ     = ไม่อยู่ใน monitors เลย (ไม่ได้ตั้งค่า/ไม่ได้ใช้ระบบนี้)
+// แยกเทาออกจากแดงตั้งใจ — บอทที่ไม่ได้ใช้ฟีเจอร์นั้นไม่ควรดูเหมือนพัง
+function systemDots(stats) {
+  const systems = [
+    { key: 'zabbix', label: 'Zabbix' },
+    { key: 'omada', label: 'Omada' },
+    { key: 'hikcentral', label: 'HikCentral' },
+  ];
+  if (!stats) {
+    return systems.map((s) =>
+      `<span class="sys-dot sys-dot-unset" title="${s.label}: ไม่มีข้อมูล"></span>`
+    ).join('');
+  }
+  return systems.map((s) => {
+    const enabled = (stats.monitors || []).includes(s.key);
+    const failed = (stats.failed || []).includes(s.key);
+    let cls, title;
+    if (!enabled) { cls = 'sys-dot-unset'; title = `${s.label}: ไม่ได้ตั้งค่า`; }
+    else if (failed) { cls = 'sys-dot-error'; title = `${s.label}: เชื่อมต่อไม่ได้`; }
+    else { cls = 'sys-dot-ok'; title = `${s.label}: เชื่อมต่อสำเร็จ`; }
+    return `<span class="sys-dot ${cls}" title="${title}"></span>`;
+  }).join('');
+}
+
 function botCell(bot, name) {
   const meta = bot.meta || {};
   const badge = contractBadge(meta.contractEnd);
+  const aiBadge = aiProviderBadge(bot.stats && bot.stats.aiProvider);
   if (!meta.companyName) {
-    return `<div class="bot-cell-company">${escapeHtml(name)}${badge}</div>`;
+    return `<div class="bot-cell-company">${escapeHtml(name)}${badge}${aiBadge}</div>`;
   }
   const tooltipParts = [meta.contactName, meta.contactPhone].filter(Boolean);
   const tooltip = tooltipParts.join(' ');
   const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : '';
   return `
-    <div class="bot-cell-company"${titleAttr}>${escapeHtml(meta.companyName)}${badge}</div>
+    <div class="bot-cell-company"${titleAttr}>${escapeHtml(meta.companyName)}${badge}${aiBadge}</div>
     <div class="bot-cell-name">${escapeHtml(name)}</div>
   `;
 }
@@ -163,7 +200,8 @@ function infoCell(bot) {
       ? `${(bot.health.monitorsLoaded && bot.health.monitorsLoaded.length) || 0} monitors`
       : (bot.health ? escapeHtml(bot.health.reason || 'offline') : '-');
   }
-  return `<span class="info-cell-text">${portPart} &middot; ${monitorsPart}</span>`;
+  const dots = `<span class="sys-dots-wrap">${systemDots(bot.stats)}</span>`;
+  return `<span class="info-cell-text">${portPart} &middot; ${monitorsPart}</span>${dots}`;
 }
 
 function escapeHtml(str) {

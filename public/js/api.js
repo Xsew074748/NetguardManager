@@ -20,6 +20,10 @@ function apiGetBotHealth(id) {
   return fetchJson(`/api/bots/${id}/health`);
 }
 
+function apiGetBotLiveStats(id) {
+  return fetchJson(`/api/bots/${id}/live-stats`);
+}
+
 function apiGetStatsSummary(name) {
   return fetchJson(`/api/bots/${name}/stats/summary`);
 }
@@ -118,6 +122,10 @@ async function loadBots() {
     }
   }));
 
+  // aiProvider/monitors/failed badge ในตาราง — throttled เหมือน sparkline (5 นาที)
+  // เพราะ /stats ของ bot เองก็ cache 60 วิอยู่แล้ว ไม่ต้องยิงถี่ทุกรอบ auto-refresh (10 วิ)
+  await refreshLiveStats(bots);
+
   botsCache = bots;
   lastRefreshedAt = Date.now();
   updateRefreshNote();
@@ -155,6 +163,33 @@ async function mapWithConcurrency(items, limit, fn) {
   const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
   await Promise.all(workers);
   return results;
+}
+
+const LIVE_STATS_REFRESH_MS = 5 * 60 * 1000;
+
+// ดึง /stats สดของทุก bot ที่ running มาเก็บ cache ไว้ (throttle 5 นาที เหมือน
+// sparkline) แล้ว apply ใส่ bot.stats ทุกครั้งที่เรียก (ของเดิมใน cache ถ้ายังไม่ถึงรอบ
+// fetch ใหม่) — bot ที่ไม่ running ไม่ยิง request เลย ได้ bot.stats = null ทันที
+async function refreshLiveStats(bots, force) {
+  const now = Date.now();
+  const runningBots = bots.filter((b) => b.state === 'running');
+
+  if (force || now - liveStatsCacheAt >= LIVE_STATS_REFRESH_MS) {
+    liveStatsCacheAt = now;
+    await mapWithConcurrency(runningBots, 5, async (bot) => {
+      const name = botDisplayName(bot);
+      try {
+        liveStatsCache[name] = await apiGetBotLiveStats(bot.id);
+      } catch (err) {
+        liveStatsCache[name] = null;
+      }
+    });
+  }
+
+  bots.forEach((bot) => {
+    if (bot.state !== 'running') { bot.stats = null; return; }
+    bot.stats = liveStatsCache[botDisplayName(bot)] || null;
+  });
 }
 
 const SPARKLINE_COLORS = { total: '#00d4a0', healthy: '#2ecc8f', problem: '#ff5c5c' };
