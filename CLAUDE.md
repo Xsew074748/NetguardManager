@@ -65,9 +65,29 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 เฟส 4: meta.json เก็บข้อมูลลูกค้าต่อ bot + คอลัมน์ลูกค้า + badge เตือนสัญญา
 เฟส 5: SQLite เก็บสถิติ uptime/problems ย้อนหลัง + poller ทุก 5 นาที +
   Dashboard แสดง Uptime 30 วัน + modal กราฟ (Chart.js) เมื่อคลิกแถว bot
+เฟส 6 (cc2a2fb): มาสคอต SVG + atmosphere background (grid/orbs/vignette/parallax) +
+  network background แบบ cyber (canvas 2D, จุดลอย+เส้นเชื่อมจางๆ) +
+  ปุ่ม "ตั้งค่า (.env)" ใน kebab menu เปิด modal แก้ .env ของ bot ได้ตรงๆ
+  (LINE/Zabbix/Omada/HikCentral/Claude AI แบบ whitelist field — ดูหัวข้อ
+  "การแก้ .env ผ่าน Manager" ด้านล่าง) — ตัดลิงก์ Port ที่เคยชี้ไปหน้า
+  /setup ของ bot ออก (route /setup ยังอยู่ในโค้ด LineBot เหมือนเดิม
+  เผื่อ bot ที่ install แบบ standalone ไม่ผ่าน Manager)
 
 ยังไม่ทำ:
 - ยังไม่ทดสอบบน Linux server จริง
+- ปุ่ม "ทดสอบการเชื่อมต่อ" ต่อกลุ่มใน config modal (เฟสหน้า)
+
+## การแก้ .env ผ่าน Manager (เฟส 6)
+- services/env-config.js: FIELDS whitelist เท่านั้น (LINE/Zabbix/Omada/
+  HikCentral/ANTHROPIC_API_KEY) — CLOUDFLARE_TUNNEL_TOKEN ไม่รวม จัดการ
+  ผ่านปุ่ม Tunnel ที่มีอยู่แล้วแยกต่างหาก
+- อ่าน (readEnvConfig): field secret คืนแค่ { set, hint: "••••"+4 ตัวท้าย }
+  ห้ามคืนค่าเต็มเด็ดขาด — field ธรรมดาคืนค่าจริง
+- เขียน (writeEnvConfig): กรอง \r\n ออกก่อนเสมอ (กัน env injection),
+  secret ว่าง/ไม่ส่ง = ไม่แตะค่าเดิม, ส่ง null = ลบค่าตั้งใจ,
+  URL field ต้องขึ้นต้น http(s):// , เขียนผ่าน setEnvValue เดิมใน
+  docker.js (แก้ให้เขียนแบบ atomic .tmp+rename แล้ว) ไม่ copy โค้ด
+- log ตอนเขียนเฉพาะชื่อ key ที่เปลี่ยน ห้าม log ค่าเด็ดขาด
 
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
@@ -104,6 +124,15 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   netguard.managed) → container อื่นที่ใช้ image เดียวกันโดยบังเอิญ
   (เช่น dev container ของโปรเจกต์ bot เอง) จะโผล่ในตาราง/ถูก poll ด้วย
   แม้ manager ไม่ได้เป็นคนสร้าง — ไม่ crash แต่ควรรู้ไว้
+- rate limit login (5 ครั้ง/15 นาที) เป็น in-memory ต่อ process — ทดสอบ
+  ด้วย script อัตโนมัติที่ login ซ้ำหลายรอบ (เช่น Playwright หลาย script
+  แยกกัน) จะโดนบล็อกไว โดยไม่มี log อะไรขึ้น (rate limiter บล็อกก่อนถึง
+  route handler) → รวม test เป็น script เดียวที่ login ครั้งเดียวแล้วใช้
+  cookie เดิมทำหลายอย่างต่อ หรือ docker compose restart manager เพื่อ
+  reset limiter ถ้าจำเป็นต้องทดสอบใหม่เร็วๆ
+- bots/test/.env มีค่า OMADA_URL เพี้ยนมาก่อนหน้านี้แล้ว (ค่าจริงคือ
+  "OMADA_URL=https://..." คือมี key ซ้อนอยู่ในค่า ไม่ใช่บั๊กจาก config
+  modal) — ยังไม่ได้แก้ เพราะไม่อยู่ใน scope ของงานตอนนั้น ควรแก้ทีหลัง
 
 ## คำสั่งที่ใช้บ่อย
 cd "D:\Project Code\RealCode\NetguardManager"
