@@ -1,4 +1,6 @@
-function showToast(message, type) {
+// duration (ms) ปรับได้ต่อข้อความ — ข้อความยาว/สำคัญกว่าปกติ (เช่นคำเตือน
+// restart vs recreate) ต้องการเวลาอ่านนานกว่า 4 วิ เริ่มต้น
+function showToast(message, type, duration = 4000) {
   const el = document.createElement('div');
   el.className = `toast ${type || 'info'}`;
 
@@ -9,6 +11,7 @@ function showToast(message, type) {
 
   const progress = document.createElement('div');
   progress.className = 'toast-progress';
+  progress.style.animationDuration = `${duration}ms`;
   el.appendChild(progress);
 
   toastContainer.appendChild(el);
@@ -16,7 +19,7 @@ function showToast(message, type) {
   setTimeout(() => {
     el.classList.add('toast-out');
     el.addEventListener('animationend', () => el.remove(), { once: true });
-  }, 4000);
+  }, duration);
 }
 
 function prefersReducedMotion() {

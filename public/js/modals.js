@@ -734,7 +734,15 @@ async function submitPullImage(btn) {
   btn.textContent = 'กำลังอัปเดต...';
   try {
     await apiPullImage();
-    showToast('อัปเดต image ล่าสุดสำเร็จ — กรุณา Restart bot ทีละตัวเพื่อใช้เวอร์ชันใหม่', 'success');
+    // pull image เข้า local cache เฉยๆ ไม่ได้สลับ container ที่รันอยู่ไปใช้ image ใหม่
+    // (Docker ผูก container กับ image ID ตอน create ไม่ใช่ตอน start/restart) — เตือนให้ชัด
+    // ว่า restart อย่างเดียวไม่พอ ต้อง "ลบแล้วสร้างใหม่" เท่านั้น ใช้ duration ยาวกว่าปกติ
+    // เพราะข้อความยาว อ่านทันด้วย type 'info'
+    showToast(
+      'Pull image สำเร็จ — bot ที่ต้องการใช้เวอร์ชันใหม่ต้อง "ลบแล้วสร้างใหม่" (ไม่ใช่แค่ Restart) กด ⋯ → ลบ Bot (ไม่ลบไฟล์) แล้วสร้างใหม่ด้วยชื่อ/port เดิม',
+      'info',
+      9000
+    );
   } catch (err) {
     showToast(`อัปเดต image ไม่สำเร็จ: ${err.message}`, 'error');
   } finally {

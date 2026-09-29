@@ -133,6 +133,14 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - bots/test/.env มีค่า OMADA_URL เพี้ยนมาก่อนหน้านี้แล้ว (ค่าจริงคือ
   "OMADA_URL=https://..." คือมี key ซ้อนอยู่ในค่า ไม่ใช่บั๊กจาก config
   modal) — ยังไม่ได้แก้ เพราะไม่อยู่ใน scope ของงานตอนนั้น ควรแก้ทีหลัง
+- Docker container ผูกกับ image ID ตอน create ไม่ใช่ตอน start/restart
+  → ปุ่ม "อัปเดต Image" ใน Manager แค่ pull image ใหม่เข้า local cache
+  → container ที่รันอยู่แล้วไม่สลับไปใช้ image ใหม่โดยอัตโนมัติ
+  → ต้อง remove+create (ผ่าน Manager: ลบ bot แบบไม่ลบไฟล์ แล้วสร้างใหม่
+    ด้วยชื่อ/port เดิม — .env/data/meta.json จะยังอยู่ครบ) ไม่ใช่แค่ restart
+  → วิธีตรวจว่า deploy จริงหรือยัง: docker inspect <container> --format
+    "{{.Image}}" เทียบกับ docker images <repo> --format "{{.ID}}" ล่าสุด
+    (อย่าเชื่อแค่ toast message ที่อาจกำกวม — ต้องเช็ค image ID ตรงๆ)
 
 ## คำสั่งที่ใช้บ่อย
 cd "D:\Project Code\RealCode\NetguardManager"
