@@ -281,6 +281,46 @@ function initAtmosphereParallax() {
   mainArea.addEventListener('scroll', onScroll, { passive: true });
 }
 
+// ── Background video — pause เมื่อแท็บไม่ active (pattern เดียวกับ mascot.js) +
+// fallback ไป network-bg.js (canvas) ถ้าไฟล์วิดีโอโหลด/เล่นไม่ได้ ──
+let networkBgFallbackTriggered = false;
+function triggerNetworkBgFallback() {
+  if (networkBgFallbackTriggered) return; // กันเรียกซ้ำถ้า error event ยิงมากกว่าครั้งเดียว
+  networkBgFallbackTriggered = true;
+  const video = document.getElementById('bgVideo');
+  if (video) video.style.display = 'none';
+  if (typeof initNetworkBg === 'function') initNetworkBg();
+}
+
+function initBgVideo() {
+  const video = document.getElementById('bgVideo');
+  if (!video) return;
+
+  // 'error' ของ <source> ไม่ bubble ขึ้น <video> และมักเกิดขึ้นตอน parse HTML
+  // (ก่อน DOMContentLoaded เสียอีก ถ้า response ตอบเร็ว เช่น 404) — ผูก listener
+  // อย่างเดียวจึงพลาดได้ ต้องเช็ค state ปัจจุบันทันทีตอนนี้ด้วย ไม่พึ่ง event อย่างเดียว
+  function checkVideoFailed() {
+    if (video.error || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+      triggerNetworkBgFallback();
+      return true;
+    }
+    return false;
+  }
+  if (checkVideoFailed()) return;
+
+  video.addEventListener('error', triggerNetworkBgFallback, true); // เผื่อ error เกิดหลังจากนี้ (capture เผื่อ browser อื่นยิงบน video เอง)
+  const source = video.querySelector('source');
+  if (source) source.addEventListener('error', triggerNetworkBgFallback); // จุดที่ error เกิดจริงในเบราว์เซอร์ส่วนใหญ่
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      video.pause();
+    } else {
+      video.play().catch(() => {}); // บาง browser คืน promise ที่ reject ได้ถ้า resume ไม่ทัน — ห้ามปล่อยเป็น unhandled rejection
+    }
+  });
+}
+
 // ── Init ──
 loadBots();
 // เรียกผ่าน arrow function เสมอ (ไม่ใช่ setInterval(loadBots, ...) ตรงๆ) เพื่อให้ mascot.js
@@ -289,6 +329,6 @@ refreshTimer = setInterval(() => loadBots(), 10000);
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof initMascot === 'function') initMascot();
-  if (typeof initNetworkBg === 'function') initNetworkBg();
+  initBgVideo();
   initAtmosphereParallax();
 });

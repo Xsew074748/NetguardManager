@@ -77,8 +77,11 @@ body::after {
   background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, .25) 100%);
 }
 
-/* ── Network background — จุดลอย + เส้นเชื่อมจางๆ วาดด้วย canvas (network-bg.js) ──
-   opacity คุมที่ระดับ canvas ทั้งก้อน ง่ายกว่าคุม alpha ทุกจุด/เส้นแยกกัน ปรับความเข้มรวมได้จุดเดียว */
+/* ── #networkBgCanvas — ยังต้องมี rule นี้ไว้แม้ .bg-video เป็นตัวหลักแล้ว ──
+   เหตุผล: network-bg.js ยังถูกเก็บไว้เป็น fallback (เรียกจาก app.js เมื่อวิดีโอ error)
+   ถ้าลบ rule นี้ canvas ที่ insert เข้ามาจะไม่มี position:fixed แล้วกลาย
+   เป็น flex item ธรรมดาใน body (body { display:flex } ใน layout.css) ซึ่งพัง
+   ทั้งหน้า sidebar/content เพราะ canvas เต็มจอไปแทรกเป็น item แรกในแนว flex */
 #networkBgCanvas {
   position: fixed;
   inset: 0;
@@ -87,12 +90,30 @@ body::after {
   opacity: .35;
 }
 
-/* ── prefers-reduced-motion: orbs/grid หยุดเคลื่อนที่ + ปิด parallax แต่ยังแสดงอยู่ ── */
+/* ── Background video — แทน canvas network-bg เดิม (จางเกินจนแทบไม่เห็น) ──
+   network-bg.js ยังเก็บไว้เป็น fallback เผื่อวิดีโอโหลดไม่ทัน/error (ดู app.js) */
+.bg-video {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* เติมเต็มจอโดยไม่บิดสัดส่วน ครอปส่วนเกิน */
+  pointer-events: none; /* คลิกทะลุไปโดนปุ่ม/การ์ดข้างหลังไม่ได้ */
+  opacity: .25; /* ต่ำกว่า canvas เดิม (.35) เพราะวิดีโอมีรายละเอียดมากกว่า ต้องจางกว่าเพื่อไม่แย่ง contrast */
+  filter: saturate(.7) brightness(.8); /* ลดความอิ่มสี/ความสว่างลงให้เข้ากับ dark theme */
+}
+
+/* ── prefers-reduced-motion: orbs/grid หยุดเคลื่อนที่ + ปิด parallax แต่ยังแสดงอยู่
+   ส่วนวิดีโอเป็น motion ล้วนๆ ไม่มีเฟรมนิ่งที่สื่อความหมายเดียวกัน → ซ่อนไปเลย ── */
 @media (prefers-reduced-motion: reduce) {
   body::before,
   body::after,
   .main-area::before {
     animation: none;
     translate: none;
+  }
+  .bg-video {
+    display: none;
   }
 }
