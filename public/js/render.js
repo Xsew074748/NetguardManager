@@ -165,17 +165,21 @@ function systemDots(stats) {
   ];
   if (!stats) {
     return systems.map((s) =>
-      `<span class="sys-dot sys-dot-unset" title="${s.label}: ไม่มีข้อมูล"></span>`
+      `<span class="sys-chip sys-chip-unset" title="${s.label}: ไม่มีข้อมูล">
+        <span class="sys-dot sys-dot-unset"></span>${s.label}
+      </span>`
     ).join('');
   }
   return systems.map((s) => {
     const enabled = (stats.monitors || []).includes(s.key);
     const failed = (stats.failed || []).includes(s.key);
-    let cls, title;
-    if (!enabled) { cls = 'sys-dot-unset'; title = `${s.label}: ไม่ได้ตั้งค่า`; }
-    else if (failed) { cls = 'sys-dot-error'; title = `${s.label}: เชื่อมต่อไม่ได้`; }
-    else { cls = 'sys-dot-ok'; title = `${s.label}: เชื่อมต่อสำเร็จ`; }
-    return `<span class="sys-dot ${cls}" title="${title}"></span>`;
+    let dotCls, title;
+    if (!enabled) { dotCls = 'sys-dot-unset'; title = `${s.label}: ไม่ได้ตั้งค่า`; }
+    else if (failed) { dotCls = 'sys-dot-error'; title = `${s.label}: เชื่อมต่อไม่ได้`; }
+    else { dotCls = 'sys-dot-ok'; title = `${s.label}: เชื่อมต่อสำเร็จ`; }
+    return `<span class="sys-chip" title="${title}">
+      <span class="sys-dot ${dotCls}"></span>${s.label}
+    </span>`;
   }).join('');
 }
 
@@ -203,7 +207,7 @@ function infoCell(bot) {
       ? `${(bot.health.monitorsLoaded && bot.health.monitorsLoaded.length) || 0} monitors`
       : (bot.health ? escapeHtml(bot.health.reason || 'offline') : '-');
   }
-  const dots = `<span class="sys-dots-wrap">${systemDots(bot.stats)}</span>`;
+  const dots = `<div class="sys-dots-wrap">${systemDots(bot.stats)}</div>`;
   return `<span class="info-cell-text">${portPart} &middot; ${monitorsPart}</span>${dots}`;
 }
 
@@ -282,7 +286,7 @@ function rowTemplate(bot, animIndex) {
               <button class="kebab-item" role="menuitem" data-action="restart" data-id="${id}">&#8635; Restart</button>
               <button class="kebab-item" role="menuitem" data-action="log" data-id="${id}" data-name="${n}">&#128196; ดู Log</button>
               <button class="kebab-item" role="menuitem" data-action="edit-meta" data-name="${n}">&#9998; แก้ไขข้อมูลลูกค้า</button>
-              <button class="kebab-item" role="menuitem" data-action="config" data-id="${id}" data-name="${n}">&#9881; ตั้งค่า (.env)</button>
+              <button class="kebab-item" role="menuitem" data-action="config" data-id="${id}" data-name="${n}">&#9881; API</button>
               ${!hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-add" data-name="${n}">&#128279; เพิ่ม Tunnel</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-log" data-name="${n}">&#128279; ดู Tunnel Log</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-remove" data-name="${n}">&#128279; ลบ Tunnel</button>` : ''}

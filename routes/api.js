@@ -59,6 +59,29 @@ router.get('/bots/:id/live-stats', async (req, res) => {
   }
 });
 
+const TEST_SYSTEMS = ['zabbix', 'omada', 'hikcentral', 'claude', 'gemini', 'openai'];
+
+// ทดสอบ credentials ผ่าน bot container — ห้าม log body (มี secret) log แค่ botId + system
+router.post('/bots/:id/test-connection', async (req, res) => {
+  const { system, config: testConfig } = req.body || {};
+  if (typeof system !== 'string' || !TEST_SYSTEMS.includes(system)) {
+    return res.status(400).json({ ok: false, message: 'system ไม่ถูกต้อง' });
+  }
+  if (!testConfig || typeof testConfig !== 'object' || Array.isArray(testConfig) || Object.keys(testConfig).length === 0) {
+    return res.status(400).json({ ok: false, message: 'config ต้องเป็น object และไม่ว่าง' });
+  }
+  try {
+    logger.info(`test-connection: bot=${req.params.id} system=${system}`);
+    res.json(await dockerService.testBotConnection(req.params.id, system, testConfig));
+  } catch (err) {
+    logger.warn(`test-connection: bot=${req.params.id} system=${system} failed (status ${err.statusCode || 500})`);
+    res.status(err.statusCode || 500).json({
+      ok: false,
+      message: err.statusCode === 404 ? 'ไม่พบ bot' : 'ทดสอบไม่สำเร็จ ลองใหม่อีกครั้ง',
+    });
+  }
+});
+
 router.post('/bots', async (req, res) => {
   try {
     const { name, port, tunnelToken, companyName } = req.body || {};

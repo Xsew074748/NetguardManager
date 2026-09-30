@@ -215,7 +215,9 @@ configModalBody.addEventListener('click', (e) => {
     return;
   }
   const clearBtn = e.target.closest('[data-clear-field]');
-  if (clearBtn) toggleClearSecret(clearBtn);
+  if (clearBtn) { toggleClearSecret(clearBtn); return; }
+  const testBtn = e.target.closest('[data-test-group]');
+  if (testBtn) runConnectionTest(testBtn);
 });
 configModalBody.addEventListener('change', (e) => {
   if (e.target.matches('select[data-field="AI_PROVIDER"]')) {

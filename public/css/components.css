@@ -89,10 +89,21 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .ai-badge-gemini { background: rgba(124,108,246,.15); color: var(--purple); }
 .ai-badge-openai { background: rgba(16,163,127,.15); color: #10a37f; }
 
-/* ── System connectivity dots (Zabbix/Omada/HikCentral) — คอลัมน์ "ข้อมูล" ── */
-.sys-dots-wrap { display: inline-flex; gap: 5px; margin-left: 8px; vertical-align: middle; }
+/* ── System connectivity chips (Zabbix/Omada/HikCentral) — คอลัมน์ "ข้อมูล" ──
+   ชื่อระบบเต็ม + จุดสี เห็นได้ทันทีไม่ต้อง hover — tooltip (title) ยังเก็บไว้เป็นข้อมูลเสริม */
+.sys-dots-wrap {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  /* wrap ได้ถ้าพื้นที่แคบ ไม่ดันคอลัมน์อื่นล้นจอ — ขึ้นบรรทัดใหม่แทน */
+}
+.sys-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 600; color: var(--text-dim);
+  padding: 2px 6px 2px 4px; border-radius: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  white-space: nowrap;
+}
 .sys-dot {
-  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block;
 }
 .sys-dot-ok {
   background: var(--green);
@@ -345,4 +356,23 @@ details.guide-accordion code { background: var(--bg-elevated); color: var(--text
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+}
+
+/* ── ปุ่มทดสอบการเชื่อมต่อใน config modal ── */
+.test-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 4px 0 12px; }
+.btn-test-connection {
+  background: transparent; border: 1px solid var(--border); color: var(--text);
+  font-size: 12px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+}
+.btn-test-connection:hover:not(:disabled) { border-color: #3a4459; background: var(--bg-elevated); }
+.btn-test-connection:disabled { opacity: .6; cursor: default; }
+.test-result { font-size: 12px; margin-left: 8px; }
+.test-result.ok { color: var(--green); }
+.test-result.error { color: var(--red); }
+.test-result.info { color: var(--amber); }
+.test-result.pending { color: var(--text-dim); }
+.test-spinner {
+  display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px;
+  border: 2px solid var(--border); border-top-color: var(--text-dim); border-radius: 50%;
+  animation: spin .8s linear infinite;
 }

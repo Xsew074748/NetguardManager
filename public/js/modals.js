@@ -297,6 +297,7 @@ const CONFIG_GROUPS = [
   {
     key: 'zabbix',
     label: 'Zabbix',
+    testable: true, testSystem: 'zabbix',
     fields: [
       { key: 'ZABBIX_URL', label: 'Zabbix URL', url: true, placeholder: 'https://zabbix.example.com' },
       { key: 'ZABBIX_API_TOKEN', label: 'API Token', secret: true },
@@ -312,6 +313,7 @@ const CONFIG_GROUPS = [
   {
     key: 'omada',
     label: 'Omada',
+    testable: true, testSystem: 'omada',
     fields: [
       { key: 'OMADA_URL', label: 'Controller URL', url: true, placeholder: 'https://omada.example.com:8043' },
       { key: 'OMADA_OMADAC_ID', label: 'Omadac ID' },
@@ -331,6 +333,7 @@ const CONFIG_GROUPS = [
   {
     key: 'hikcentral',
     label: 'HikCentral',
+    testable: true, testSystem: 'hikcentral',
     fields: [
       { key: 'HIKCENTRAL_URL', label: 'HikCentral URL', url: true, placeholder: 'https://hikcentral.example.com' },
       { key: 'HIKCENTRAL_APP_KEY', label: 'App Key (AK)' },
@@ -347,6 +350,7 @@ const CONFIG_GROUPS = [
   {
     key: 'ai',
     label: 'AI Provider',
+    testable: true, // system อ่านจาก dropdown AI_PROVIDER ตอนกดปุ่ม
     fields: [
       { key: 'AI_PROVIDER', label: 'AI Provider', select: true, options: [
         { value: 'claude', label: 'Claude (Anthropic)' },
@@ -449,10 +453,11 @@ function renderConfigSections(cfg) {
       <details class="config-section"${i === 0 ? ' open' : ''}>
         <summary>
           <span class="config-section-title">${group.label}</span>
-          <span class="config-badge ${done ? 'ok' : 'pending'}">${done ? 'ตั้งค่าแล้ว ✓' : 'ยังไม่ตั้ง'}</span>
+          <span class="config-badge ${done ? 'ok' : 'pending'}">${done ? 'พร้อมใช้ ✓' : 'ยังไม่พร้อม'}</span>
         </summary>
         <div class="config-section-body">
           ${group.fields.map((f) => renderConfigField(cfg, f)).join('')}
+          ${group.testable ? `<div class="test-row"><button type="button" class="btn-test-connection" data-test-group="${group.key}"${group.testSystem ? ` data-test-system="${group.testSystem}"` : ''}>ทดสอบการเชื่อมต่อ</button><span class="test-result" data-test-result="${group.key}" aria-live="polite"></span></div>` : ''}
           <details class="guide-accordion">
             <summary>วิธีหาค่านี้ ?</summary>
             ${group.guide}
@@ -466,7 +471,7 @@ function renderConfigSections(cfg) {
 async function openConfigModal(name, id) {
   configTarget = { name, id };
   configOriginal = null;
-  configModalTitle.textContent = `ตั้งค่า — ${name}`;
+  configModalTitle.textContent = `API — ${name}`;
   configModalError.classList.remove('show');
   configModalBody.innerHTML = 'Loading...';
   configModal.classList.add('show');
@@ -508,6 +513,78 @@ function toggleClearSecret(btn) {
     input.disabled = true;
     input.placeholder = '(จะลบค่านี้เมื่อบันทึก)';
     btn.textContent = 'เลิกล้างค่า';
+  }
+}
+
+// ── ทดสอบการเชื่อมต่อ (ต่อกลุ่ม) ──
+// จับคู่ field ของแต่ละกลุ่มกับชื่อ key ที่ LineBot /test-connection ต้องการ
+const TEST_FIELD_MAP = {
+  zabbix: { ZABBIX_URL: 'url', ZABBIX_API_TOKEN: 'apiToken' },
+  omada: {
+    OMADA_URL: 'url', OMADA_OMADAC_ID: 'omadacId', OMADA_CLIENT_ID: 'clientId',
+    OMADA_CLIENT_SECRET: 'clientSecret', OMADA_SITE_ID: 'siteId',
+  },
+  hikcentral: { HIKCENTRAL_URL: 'url', HIKCENTRAL_APP_KEY: 'appKey', HIKCENTRAL_APP_SECRET: 'appSecret' },
+  claude: { ANTHROPIC_API_KEY: 'apiKey' },
+  gemini: { GEMINI_API_KEY: 'apiKey' },
+  openai: { OPENAI_API_KEY: 'apiKey' },
+};
+
+// คืน { system, config } หรือ { warn } เมื่อมี secret ที่ frontend ไม่รู้ค่าจริง (ยังไม่กรอกใหม่)
+function buildTestRequest(btn) {
+  let system = btn.dataset.testSystem;
+  if (!system) {
+    const sel = configModalBody.querySelector('select[data-field="AI_PROVIDER"]');
+    system = (sel && sel.value) || 'claude';
+  }
+  const map = TEST_FIELD_MAP[system];
+  const cfg = {};
+  for (const [envKey, name] of Object.entries(map)) {
+    const field = CONFIG_ALL_FIELDS.find((f) => f.key === envKey);
+    const input = configModalBody.querySelector(`[data-field="${envKey}"]`);
+    const value = input && !input.disabled ? input.value.trim() : '';
+    if (field.secret && value === '') {
+      const orig = configOriginal && configOriginal[envKey];
+      if (orig && orig.set && !(input && input.dataset.pendingClear === '1')) {
+        return { warn: 'ทดสอบด้วยค่าที่บันทึกไว้แล้วไม่ได้ กรุณากรอกค่าใหม่ก่อนทดสอบ' };
+      }
+    }
+    if (value !== '') cfg[name] = value;
+  }
+  if (Object.keys(cfg).length === 0) return { warn: 'กรุณากรอกค่าก่อนทดสอบ' };
+  return { system, config: cfg };
+}
+
+function setTestResult(el, kind, text, spinner) {
+  el.className = `test-result ${kind}`;
+  el.textContent = '';
+  if (spinner) {
+    const sp = document.createElement('span');
+    sp.className = 'test-spinner';
+    el.appendChild(sp);
+  }
+  el.appendChild(document.createTextNode(text));
+}
+
+async function runConnectionTest(btn) {
+  const resultEl = configModalBody.querySelector(`[data-test-result="${btn.dataset.testGroup}"]`);
+  if (!resultEl || !configTarget) return;
+  const req = buildTestRequest(btn);
+  if (req.warn) {
+    setTestResult(resultEl, 'info', req.warn);
+    return;
+  }
+  const target = configTarget;
+  btn.disabled = true;
+  setTestResult(resultEl, 'pending', 'กำลังทดสอบ...', true);
+  try {
+    const r = await apiTestConnection(target.id, req.system, req.config);
+    if (configTarget !== target) return; // modal ถูกปิด/เปลี่ยน bot ระหว่างรอ
+    setTestResult(resultEl, r.ok ? 'ok' : 'error', `${r.ok ? '✓' : '✗'} ${r.message || ''}`);
+  } catch (err) {
+    if (configTarget === target) setTestResult(resultEl, 'error', '✗ ทดสอบไม่สำเร็จ ลองใหม่อีกครั้ง');
+  } finally {
+    btn.disabled = false;
   }
 }
 

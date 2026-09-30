@@ -221,3 +221,11 @@ async function refreshSparklineData(bots, force) {
   renderSparkline('sparkHealthy', series.healthySeries, SPARKLINE_COLORS.healthy);
   renderSparkline('sparkProblem', series.problemSeries, SPARKLINE_COLORS.problem);
 }
+
+function apiTestConnection(botId, system, config) {
+  return fetchJson(`/api/bots/${botId}/test-connection`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ system, config }),
+  });
+}

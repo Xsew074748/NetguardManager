@@ -258,6 +258,39 @@ async function getBotStats(containerId) {
   return null;
 }
 
+// ให้ bot ทดสอบ credentials ที่ยังไม่บันทึก (POST /test-connection ของ LineBot)
+// ตั้งชื่อพารามิเตอร์ testConfig (ไม่ใช่ config) กันชนกับ module config ที่ใช้อ่าน botNetwork
+// ห้าม log testConfig — มี secret
+async function testBotConnection(containerId, system, testConfig) {
+  const container = docker.getContainer(containerId);
+  const detail = await container.inspect();
+  if (!detail.State.Running) {
+    return { ok: false, message: 'Bot ไม่ได้ทำงานอยู่ ต้อง Start ก่อนทดสอบ' };
+  }
+
+  const containerName = stripLeadingSlash(detail.Name);
+  const networks = detail.NetworkSettings.Networks || {};
+  const ip = (networks[config.botNetwork] && networks[config.botNetwork].IPAddress)
+    || Object.values(networks).map((n) => n.IPAddress).find(Boolean);
+
+  for (const host of [containerName, ip].filter(Boolean)) {
+    try {
+      // timeout ยาวกว่า fetchStats เพราะ bot ต้องยิงออกไปหาระบบภายนอกจริง (สูงสุด ~5 วิ, AI ~15 วิ)
+      const res = await fetch(`http://${host}:3000/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system, config: testConfig }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await res.json();
+      return { ok: !!data.ok, message: String(data.message || '') };
+    } catch (err) {
+      // ลอง host ถัดไป
+    }
+  }
+  return { ok: false, message: 'ติดต่อ bot ไม่ได้ ลองใหม่อีกครั้ง' };
+}
+
 async function createBot({ name, port, tunnelToken, companyName }) {
   if (!isValidBotName(name)) {
     throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
@@ -541,6 +574,7 @@ module.exports = {
   getBotLogs,
   getBotHealth,
   getBotStats,
+  testBotConnection,
   createBot,
   startBot,
   stopBot,
