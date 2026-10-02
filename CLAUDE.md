@@ -89,6 +89,20 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   docker.js (แก้ให้เขียนแบบ atomic .tmp+rename แล้ว) ไม่ copy โค้ด
 - log ตอนเขียนเฉพาะชื่อ key ที่เปลี่ยน ห้าม log ค่าเด็ดขาด
 
+## ปุ่ม "ทดสอบการเชื่อมต่อ" ใน config modal (ทำแล้ว commit 176d276)
+- ปุ่ม "API" ใน kebab (เดิม "ตั้งค่า (.env)") เปิด modal; กลุ่ม Zabbix/Omada/HikCentral/AI มีปุ่มทดสอบ (LINE ไม่มี)
+- Manager proxy ไปที่ POST /test-connection ของ bot ผ่าน Docker DNS (docker.js testBotConnection, timeout 20 วินาที)
+  route POST /api/bots/:id/test-connection — ห้าม log body (มี secret) log แค่ botId + system
+- secret ที่มีค่าเดิมซ่อนอยู่และยังไม่กรอกใหม่ → frontend ไม่รู้ค่าจริง จึงเตือนสีเหลืองแทนการยิง test
+- bot ที่ยังใช้ image เก่า (ไม่มี /test-connection) จะตอบ "ติดต่อ bot ไม่ได้" — ต้อง recreate bot ก่อน
+- autofill fix (commit แล้ว; รอผลทดสอบ Chrome จริงจากผู้ใช้): แก้ autofill (name="bot-table-filter" + data-lpignore ที่ช่องค้นหา, autocomplete="new-password" ที่ password ใน login.html
+  และใน config modal) แก้ + rebuild manager แล้ว
+- /js/*.js เปิดอ่านได้โดยไม่ต้อง login (express.static) เป็นพฤติกรรมเดิม ยังไม่ได้ตัดสินใจว่าจะปิดหรือไม่
+- ค่า OMADA_URL ใน bots/test/.env ยังเพี้ยน (ซ้อนคีย์) ยังไม่ได้แก้
+- บันทึก meta ผ่าน edit-meta ทุกครั้งอัปเดต updatedAt และเพิ่มฟิลด์ว่าง (พฤติกรรมเดิมของ writeMeta ไม่ใช่บั๊ก)
+- ทดสอบ UI ด้วยสคริปต์ (Edge headless + puppeteer-core) และรัน Manager ชั่วคราวจาก image เดียวกันบนพอร์ตอื่นได้
+  (ต้อง --network netguard-net และใน Git Bash ตั้ง MSYS_NO_PATHCONV=1) — อย่าเก็บรหัสผ่านไว้ในไฟล์นี้
+
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
   จะใส่ DB เมื่อต้องเก็บสถิติย้อนหลังเท่านั้น

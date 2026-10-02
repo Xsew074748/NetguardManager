@@ -420,7 +420,7 @@ function renderConfigField(cfg, f) {
       <div class="field${hiddenClass}"${providerAttr}>
         <label for="${inputId}">${f.label}</label>
         <div class="input-wrap">
-          <input type="password" id="${inputId}" data-field="${f.key}" autocomplete="off" placeholder="${escapeHtml(placeholder)}">
+          <input type="password" id="${inputId}" data-field="${f.key}" autocomplete="new-password" placeholder="${escapeHtml(placeholder)}">
           <button type="button" class="toggle-vis" data-toggle-vis="${inputId}" title="แสดง/ซ่อน" tabindex="-1">&#128065;</button>
         </div>
         ${isSet ? `<button type="button" class="btn-clear-secret" data-clear-field="${f.key}">ล้างค่า</button>` : ''}
