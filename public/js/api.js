@@ -229,3 +229,15 @@ function apiTestConnection(botId, system, config) {
     body: JSON.stringify({ system, config }),
   });
 }
+
+function apiGetDailySummary(name) {
+  return fetchJson(`/api/bots/${name}/daily-summary`);
+}
+
+function apiSaveDailySummary(name, times) {
+  return fetchJson(`/api/bots/${name}/daily-summary`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ times }),
+  });
+}

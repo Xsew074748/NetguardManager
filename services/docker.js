@@ -291,6 +291,32 @@ async function testBotConnection(containerId, system, testConfig) {
   return { ok: false, message: 'ติดต่อ bot ไม่ได้ ลองใหม่อีกครั้ง' };
 }
 
+// เรียก endpoint ภายในของ bot ผ่าน Docker DNS (ใช้กับ /api/daily-summary/*) — คืน { reachable, status, data } ไม่ throw
+// reachable:false = bot ไม่รัน/ติดต่อไม่ได้; status 404 = bot ยังใช้ image เก่าที่ไม่มี endpoint นี้
+async function callBot(botName, method, apiPath, timeoutMs = 8000) {
+  let detail;
+  try {
+    detail = await docker.getContainer(`netguard-${botName}`).inspect();
+  } catch {
+    return { reachable: false, reason: 'not-found' };
+  }
+  if (!detail.State.Running) return { reachable: false, reason: 'not-running' };
+  const networks = detail.NetworkSettings.Networks || {};
+  const ip = (networks[config.botNetwork] && networks[config.botNetwork].IPAddress)
+    || Object.values(networks).map((n) => n.IPAddress).find(Boolean);
+  for (const host of [`netguard-${botName}`, ip].filter(Boolean)) {
+    try {
+      const res = await fetch(`http://${host}:3000${apiPath}`, { method, signal: AbortSignal.timeout(timeoutMs) });
+      let data = null;
+      try { data = await res.json(); } catch { /* no body */ }
+      return { reachable: true, status: res.status, data };
+    } catch {
+      // ลอง host ถัดไป
+    }
+  }
+  return { reachable: false, reason: 'unreachable' };
+}
+
 async function createBot({ name, port, tunnelToken, companyName }) {
   if (!isValidBotName(name)) {
     throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
@@ -575,6 +601,7 @@ module.exports = {
   getBotHealth,
   getBotStats,
   testBotConnection,
+  callBot,
   createBot,
   startBot,
   stopBot,

@@ -376,3 +376,14 @@ details.guide-accordion code { background: var(--bg-elevated); color: var(--text
   border: 2px solid var(--border); border-top-color: var(--text-dim); border-radius: 50%;
   animation: spin .8s linear infinite;
 }
+
+/* ── เวลาแจ้งเตือนสรุปประจำวัน (config modal) ── */
+.ds-hint { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; }
+.ds-times { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.ds-time-row { display: flex; align-items: center; gap: 8px; }
+.ds-time-row input[type="time"] {
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; font-size: 14px; color-scheme: dark;
+}
+.ds-remove { padding: 4px 10px; }
+.ds-live { font-size: 12px; color: var(--text-dim); margin-top: 4px; }

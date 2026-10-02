@@ -3,6 +3,7 @@ const guard = require('../middleware/guard');
 const dockerService = require('../services/docker');
 const metaService = require('../services/meta');
 const envConfigService = require('../services/env-config');
+const dailySummaryConfig = require('../services/daily-summary-config');
 const statsDb = require('../services/stats-db');
 const logger = require('../services/logger');
 
@@ -205,6 +206,44 @@ router.put('/bots/:name/config', async (req, res) => {
     res.json({ ok: true, changed: result.changed });
   } catch (err) {
     handleError(res, err, `Failed to update config for ${req.params.name}`);
+  }
+});
+
+// ── เวลาแจ้งเตือนสรุปประจำวัน (เก็บใน data/settings.json ของ bot; bot ตั้ง cron ใหม่ทันทีผ่าน reload) ──
+function describeLive(call) {
+  if (!call.reachable) return { reachable: false, reason: call.reason };
+  if (call.status === 404) return { reachable: true, supported: false };
+  const d = call.data || {};
+  return { reachable: true, supported: true, ok: call.status === 200 && d.ok !== false, times: d.times, nextRun: d.nextRun, error: d.error };
+}
+
+router.get('/bots/:name/daily-summary', async (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const saved = dailySummaryConfig.readTimes(req.params.name);
+    const live = describeLive(await dockerService.callBot(req.params.name, 'GET', '/api/daily-summary/schedule'));
+    res.json({ ...saved, live });
+  } catch (err) {
+    handleError(res, err, `Failed to read daily-summary for ${req.params.name}`);
+  }
+});
+
+router.put('/bots/:name/daily-summary', async (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const saved = dailySummaryConfig.writeTimes(req.params.name, (req.body || {}).times);
+    logger.info(`daily-summary times updated for ${req.params.name}: ${saved.times.join(', ')}`);
+    const live = describeLive(await dockerService.callBot(req.params.name, 'POST', '/api/daily-summary/reload'));
+    const applied = !!(live.reachable && live.supported && live.ok);
+    let note = 'ตั้งเวลาใหม่ให้ bot ทันทีแล้ว (ไม่ต้อง restart)';
+    if (!applied) {
+      if (!live.reachable) note = 'บันทึกแล้ว แต่ bot ไม่ได้ทำงานอยู่ — จะใช้เวลานี้ตอน bot start';
+      else if (!live.supported) note = 'บันทึกแล้ว แต่ bot ยังใช้ image เก่า (ไม่รองรับตั้งเวลาสรุปประจำวัน) — ต้องอัปเดต image และ recreate bot';
+      else note = `บันทึกแล้ว แต่ bot ตั้งเวลาใหม่ไม่สำเร็จ: ${live.error || 'ไม่ทราบสาเหตุ'}`;
+    }
+    res.json({ ok: true, times: saved.times, applied, live, note });
+  } catch (err) {
+    handleError(res, err, `Failed to update daily-summary for ${req.params.name}`);
   }
 });
 

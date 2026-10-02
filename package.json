@@ -4,7 +4,8 @@
   "description": "Dashboard for managing multiple NetGuard AI bot containers",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test tests/*.test.js"
   },
   "engines": {
     "node": ">=22"

@@ -225,7 +225,7 @@ configModalBody.addEventListener('change', (e) => {
   }
 });
 configModalBody.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.matches('input')) {
+  if (e.key === 'Enter' && e.target.matches('input') && !e.target.matches('[data-ds-time]')) {
     e.preventDefault();
     submitConfigModal(false);
   }

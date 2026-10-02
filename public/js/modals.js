@@ -483,9 +483,116 @@ async function openConfigModal(name, id) {
     const cfg = await apiGetBotConfig(name);
     configOriginal = cfg;
     configModalBody.innerHTML = renderConfigSections(cfg);
+    configModalBody.insertAdjacentHTML('beforeend', dailySummarySectionHtml());
+    loadDailySummarySection(name);
   } catch (err) {
     configModalBody.innerHTML = `<div class="form-error show">โหลดข้อมูลไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+// ── เวลาแจ้งเตือนสรุปประจำวัน (อยู่ใน config modal; บันทึกแยกจาก .env และมีผลทันทีไม่ต้อง restart) ──
+// เก็บเป็นรายการ HH:mm เวลาไทย — server เป็นผู้ validate จริง (ฝั่งนี้ตรวจแค่ให้แจ้งเร็ว)
+function dailySummarySectionHtml() {
+  return `
+    <details class="config-section" id="dsSection" open>
+      <summary>
+        <span class="config-section-title">สรุปปัญหาประจำวัน (แจ้งเตือนอัตโนมัติ)</span>
+        <span class="config-badge pending" id="dsBadge">กำลังโหลด...</span>
+      </summary>
+      <div class="config-section-body">
+        <p class="ds-hint">ส่งสรุปปัญหาให้ผู้ใช้ที่อนุมัติแล้วทุกคนตามเวลาด้านล่าง · เวลาไทย (Asia/Bangkok) 24 ชม. · บันทึกแล้วมีผลทันที ไม่ต้อง Restart bot</p>
+        <div id="dsTimes" class="ds-times"></div>
+        <div class="test-row">
+          <button type="button" class="btn btn-secondary" id="dsAddBtn">+ เพิ่มเวลา</button>
+          <button type="button" class="btn btn-teal" id="dsSaveBtn">บันทึกเวลา</button>
+          <span class="test-result" id="dsResult" aria-live="polite"></span>
+        </div>
+        <div class="ds-live" id="dsLive"></div>
+      </div>
+    </details>
+  `;
+}
+
+function dsRenderTimes(times) {
+  const box = document.getElementById('dsTimes');
+  if (!box) return;
+  box.innerHTML = times.map((t) => `
+    <div class="ds-time-row">
+      <input type="time" data-ds-time value="${escapeHtml(t)}" step="60" required>
+      <button type="button" class="btn btn-secondary ds-remove" data-ds-remove title="ลบเวลานี้">✕</button>
+    </div>`).join('');
+}
+
+function dsCollectTimes() {
+  return Array.from(document.querySelectorAll('#dsTimes [data-ds-time]')).map((el) => el.value);
+}
+
+function dsSetResult(text, kind) {
+  const el = document.getElementById('dsResult');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `test-result${kind ? ' ' + kind : ''}`;
+}
+
+function dsRenderLive(live, saved) {
+  const el = document.getElementById('dsLive');
+  const badge = document.getElementById('dsBadge');
+  if (!el || !badge) return;
+  let text;
+  let state = 'pending';
+  if (!live || !live.reachable) {
+    text = 'bot ไม่ได้ทำงานอยู่ — เวลาที่บันทึกจะใช้ตอน bot start';
+  } else if (!live.supported) {
+    text = 'bot ใช้ image เก่า ยังไม่รองรับการตั้งเวลา — ต้องอัปเดต image และ recreate bot';
+  } else {
+    const next = live.nextRun ? new Date(live.nextRun).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    text = `bot ใช้อยู่ตอนนี้: ${(live.times || []).join(', ')} · รอบถัดไป ${next}`;
+    state = 'ok';
+  }
+  el.textContent = text;
+  badge.textContent = state === 'ok' ? 'ใช้งานอยู่ ✓' : 'รอ bot';
+  badge.className = `config-badge ${state}`;
+  if (saved && saved.invalid) el.textContent += ` (ค่าในไฟล์ไม่ถูกต้อง: ${saved.invalid})`;
+}
+
+async function loadDailySummarySection(name) {
+  try {
+    const data = await apiGetDailySummary(name);
+    if (!configTarget || configTarget.name !== name) return; // modal ถูกปิด/เปลี่ยน bot ระหว่างรอ
+    dsRenderTimes(data.times);
+    dsRenderLive(data.live, data);
+  } catch (err) {
+    dsSetResult(`โหลดไม่สำเร็จ: ${err.message}`, 'error');
+  }
+  const section = document.getElementById('dsSection');
+  if (!section) return;
+  section.querySelector('#dsAddBtn').addEventListener('click', () => {
+    dsRenderTimes([...dsCollectTimes(), '12:00']);
+  });
+  section.querySelector('#dsTimes').addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-ds-remove]');
+    if (!rm) return;
+    rm.closest('.ds-time-row').remove();
+  });
+  section.querySelector('#dsSaveBtn').addEventListener('click', async () => {
+    const times = dsCollectTimes();
+    if (times.length === 0) return dsSetResult('ต้องมีเวลาอย่างน้อย 1 ค่า', 'error');
+    if (times.some((t) => !t)) return dsSetResult('มีช่องเวลาที่ยังไม่ได้กรอก', 'error');
+    if (new Set(times).size !== times.length) return dsSetResult('มีเวลาซ้ำกัน', 'error');
+    const btn = document.getElementById('dsSaveBtn');
+    btn.disabled = true;
+    dsSetResult('กำลังบันทึก...', '');
+    try {
+      const r = await apiSaveDailySummary(name, times);
+      dsRenderTimes(r.times);
+      dsRenderLive(r.live, null);
+      dsSetResult(r.note, r.applied ? 'ok' : 'info');
+    } catch (err) {
+      dsSetResult(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function closeConfigModal() {
