@@ -170,6 +170,7 @@ function checkDailyRollup() {
     statsDb.rollupDaily(yesterday);
     statsDb.pruneOldSamples();
     statsDb.pruneDetail();
+    statsDb.pruneAudit();
     lastRollupDay = today;
   } catch (err) {
     logger.error('poller: daily rollup ล้มเหลว', err.message);

@@ -131,6 +131,34 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   แล้วชี้ .env ไปที่ mock-lab; ห้ามติด tag `:latest` ให้ image ทดสอบ; ทดสอบเสร็จลบ container/volume/โฟลเดอร์ bots/test-* ทิ้ง
   (เตือน: Manager จริงจะเห็น bot ทดสอบเพราะ label เดียวกัน และ poll มันด้วยโค้ดเก่าจน bot ถูกลบ)
 
+## Auth hardening + Audit log (งานเสริมความปลอดภัย)
+- รหัสผ่าน: **scrypt** (Node built-in, ไม่มี dependency เพิ่ม; N=2^15 r=8 p=1, salt 16 ไบต์, เก็บพารามิเตอร์ในสตริง `scrypt$N$r$p$salt$hash`)
+  โค้ด: services/password.js (hash/verify), services/auth-store.js (auth.json), middleware/guard.js (`authenticate`, session)
+- **Migration จาก SHA-256 เดิม โดยไม่แตะ .env**: `.env` (MANAGER_PASSWORD_HASH) ยังเป็น SHA-256 เดิมได้ตลอด — login ครั้งแรกที่รหัสถูกต้อง
+  ระบบสร้าง scrypt hash เขียนลง `/app/data/auth.json` (volume manager-data, atomic, mode 0600) หลังจากนั้น auth.json เป็นตัวตัดสินเพียงที่เดียว
+  ลำดับ: auth.json (ถ้าใช้ได้) → .env (SHA-256: ตรวจ+migrate / scrypt: ตรวจตรงๆ) → ไม่มี/รูปแบบไม่รู้จัก = **fail closed (ปิด login, 503)**
+  เลิกรับรหัสเริ่มต้น "admin" แล้ว
+- **ไม่ล็อกตัวเอง**: auth.json หาย/เสีย/เขียนไม่ได้ → fall back ไป .env (login ได้ด้วยรหัสเดิม); rollback ไป image เก่าได้เพราะ .env ไม่เปลี่ยน
+  กู้ฉุกเฉิน: `docker exec netguard-manager rm /app/data/auth.json` แล้ว login ด้วยรหัสใน .env (เดิม) — ใช้ได้เฉพาะถ้ายังไม่ได้เปลี่ยนรหัสผ่านด้วย set-password
+  (หลังเปลี่ยนรหัสผ่านแล้ว รหัสใน .env เป็นรหัสเก่า — ถ้าลบ auth.json จะกลับไปใช้รหัสเก่านั้น)
+- เปลี่ยนรหัสผ่าน: `docker exec -it netguard-manager node scripts/set-password.js` (พิมพ์ในเทอร์มินัล ไม่ echo, ≥ 12 ตัว, ไม่รับ argument/pipe)
+  session เก่าทั้งหมดหมดอายุภายใน ~5 วินาที; scripts/gen-password.js (SHA-256) ถูกยกเลิก; ห้ามส่งรหัสผ่าน/hash ผ่านแชต
+- รหัสเดิมที่สั้นกว่า 12 ตัว: migrate ให้แต่ติดธง weak ใน auth.json → UI แสดง banner เตือน + audit `auth.weak-password` (เตือนอย่างเดียว ไม่บังคับ)
+- **Rate limit login** (middleware/login-limit.js, express-rate-limit ตัวเดิม): นับเฉพาะ login ที่ผิด; 5 ครั้ง/15 นาที/IP **และ** เพดานรวม 20 ครั้ง/15 นาทีทั้งระบบ
+  ⚠️ บน Docker Desktop ทุก client ถูก NAT เป็น IP เดียว (`::ffff:172.18.0.1`) → "ต่อ IP" แยกคนไม่ได้ และ networkGuard ชั้นแรกผ่านเสมอ;
+  ใครเข้าพอร์ต 8080 ได้ก็ล็อกแอดมินออก 15 นาทีได้ด้วยการส่งรหัสผิดรวมครบ — ทางแก้จริงคือ network layer (bind พอร์ตเฉพาะ IP / firewall) ยังไม่ได้ทำ (งานแยก)
+  ล็อกอยู่ในหน่วยความจำ (restart Manager = รีเซ็ต)
+- Session: Map ในหน่วยความจำ 24 ชม. (หายเมื่อ restart — deploy ทีไรต้อง login ใหม่), กวาด session หมดอายุทุก 10 นาที
+- **Audit log**: ตาราง `audit_log` ใน stats.db (เก็บ 365 วัน, prune ใน checkDailyRollup) — services/audit.js
+  บันทึกอัตโนมัติทุก request ที่ไม่ใช่ GET ใน /api (bot.create/start/stop/restart/remove, image.pull, tunnel.attach/detach, bot.meta.update,
+  bot.config.update, bot.daily-summary.update, bot.test-connection; route ใหม่ที่ยังไม่ map จะลงเป็น "METHOD /path") + auth.login (ok/fail), auth.login-locked,
+  auth.logout, auth.password-migrated, auth.weak-password
+  **ไม่เก็บ secret**: ไม่รับ req.body; config เก็บเฉพาะชื่อ key ที่เปลี่ยน, test-connection เก็บแค่ชื่อระบบ, tunnel เก็บแค่ว่ามีหรือไม่; sanitize ซ้ำชั้นที่สอง
+  (ตัด key ชื่อลับ, ค่าที่หน้าตาเป็น token → [redacted], object ซ้อน, จำกัดขนาด) — เขียน audit พังไม่ทำให้ action ล้ม
+  actor = `sess-xxxxxxxx` (hash ตัดสั้นของ session; ใช้รหัสผ่านร่วมกันจึงระบุตัวบุคคลไม่ได้) และ IP จะเป็น gateway เดียวกันบน Docker Desktop
+  ดูได้ที่ปุ่ม "Audit log" ใน UI หรือ `GET /api/audit?action=bot.&result=fail&limit=` (ต้อง login; การดูไม่ถูกบันทึกซ้ำ)
+- ต้อง login ใหม่ทุกครั้งหลัง deploy; **ขั้น deploy: login ครั้งแรกด้วยรหัสเดิมเพื่อให้ระบบย้าย hash** (ถ้าใช้รหัสผิดจะไม่ย้ายและไม่เสียหายอะไร)
+
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
   จะใส่ DB เมื่อต้องเก็บสถิติย้อนหลังเท่านั้น

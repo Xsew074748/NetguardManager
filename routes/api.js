@@ -6,11 +6,14 @@ const envConfigService = require('../services/env-config');
 const dailySummaryConfig = require('../services/daily-summary-config');
 const statsDb = require('../services/stats-db');
 const poller = require('../services/poller');
+const audit = require('../services/audit');
 const logger = require('../services/logger');
 
 const router = express.Router();
 
 router.use(guard.networkGuard, guard.requireAuth);
+// บันทึก audit ทุก request ที่เปลี่ยนสถานะ (ไม่ใช่ GET) — ต้องอยู่หลัง requireAuth เพื่อให้ actor เป็น session จริง
+router.use(audit.auditMutations);
 
 function handleError(res, err, fallbackMsg) {
   const status = err.statusCode || 500;
@@ -19,6 +22,7 @@ function handleError(res, err, fallbackMsg) {
   } else {
     logger.warn(`${fallbackMsg}:`, err.message);
   }
+  if (res.locals.audit) res.locals.auditError = audit.sanitizeText(err.message || fallbackMsg);
   res.status(status).json({ error: err.message || fallbackMsg });
 }
 
@@ -74,6 +78,7 @@ router.post('/bots/:id/test-connection', async (req, res) => {
   }
   try {
     logger.info(`test-connection: bot=${req.params.id} system=${system}`);
+    res.locals.audit.detail = { system }; // ชื่อระบบเท่านั้น — ห้ามใส่ config (มี secret)
     res.json(await dockerService.testBotConnection(req.params.id, system, testConfig));
   } catch (err) {
     logger.warn(`test-connection: bot=${req.params.id} system=${system} failed (status ${err.statusCode || 500})`);
@@ -87,6 +92,8 @@ router.post('/bots/:id/test-connection', async (req, res) => {
 router.post('/bots', async (req, res) => {
   try {
     const { name, port, tunnelToken, companyName, image } = req.body || {};
+    res.locals.audit.target = typeof name === 'string' ? name : null;
+    res.locals.audit.detail = { port: Number(port) || null, image: image || 'default', withTunnel: !!tunnelToken }; // tunnelToken เก็บแค่ว่ามีหรือไม่
     const bot = await dockerService.createBot({ name, port, tunnelToken, companyName, image });
     res.status(201).json(bot);
   } catch (err) {
@@ -124,6 +131,7 @@ router.post('/bots/:id/restart', async (req, res) => {
 router.delete('/bots/:id', async (req, res) => {
   try {
     const deleteFiles = req.query.deleteFiles === 'true';
+    res.locals.audit.detail = { deleteFiles };
     await dockerService.removeBot(req.params.id, { deleteFiles });
     res.json({ ok: true });
   } catch (err) {
@@ -182,6 +190,7 @@ router.get('/bots/:name/meta', async (req, res) => {
 router.put('/bots/:name/meta', async (req, res) => {
   if (!requireValidBotName(req, res)) return;
   try {
+    res.locals.audit.detail = { fields: Object.keys(req.body || {}) }; // ชื่อ field เท่านั้น
     const meta = metaService.writeMeta(req.params.name, req.body || {});
     res.json(meta);
   } catch (err) {
@@ -204,6 +213,7 @@ router.put('/bots/:name/config', async (req, res) => {
   try {
     const result = envConfigService.writeEnvConfig(req.params.name, req.body || {});
     logger.info(`config updated for ${req.params.name}: ${result.changed.join(', ')}`);
+    res.locals.audit.detail = { changed: result.changed }; // ชื่อ key ที่เปลี่ยนเท่านั้น ห้ามค่า
     res.json({ ok: true, changed: result.changed });
   } catch (err) {
     handleError(res, err, `Failed to update config for ${req.params.name}`);
@@ -242,6 +252,7 @@ router.put('/bots/:name/daily-summary', async (req, res) => {
       else if (!live.supported) note = 'บันทึกแล้ว แต่ bot ยังใช้ image เก่า (ไม่รองรับตั้งเวลาสรุปประจำวัน) — ต้องอัปเดต image และ recreate bot';
       else note = `บันทึกแล้ว แต่ bot ตั้งเวลาใหม่ไม่สำเร็จ: ${live.error || 'ไม่ทราบสาเหตุ'}`;
     }
+    res.locals.audit.detail = { times: saved.times, applied };
     res.json({ ok: true, times: saved.times, applied, live, note });
   } catch (err) {
     handleError(res, err, `Failed to update daily-summary for ${req.params.name}`);
@@ -328,5 +339,20 @@ router.get('/bots/:name/tunnel/logs', async (req, res) => {
     handleError(res, err, `Failed to get tunnel logs for ${req.params.name}`);
   }
 });
+
+// ดู audit log (ใหม่สุดก่อน) — ?action=bot.  (prefix) &result=ok|fail|denied|warn &limit=&offset=
+router.get('/audit', (req, res) => {
+  try {
+    const result = ['ok', 'fail', 'denied', 'warn'].includes(req.query.result) ? req.query.result : undefined;
+    const { total, rows } = statsDb.queryAudit({ action: req.query.action, result, limit: req.query.limit, offset: req.query.offset });
+    res.json({ total, rows: rows.map((r) => ({ ...r, detail: r.detail ? safeParse(r.detail) : null })) });
+  } catch (err) {
+    handleError(res, err, 'Failed to read audit log');
+  }
+});
+
+function safeParse(json) {
+  try { return JSON.parse(json); } catch { return null; }
+}
 
 module.exports = router;

@@ -77,6 +77,20 @@ function initDb() {
       PRIMARY KEY (bot_name, hour_ts)
     );
 
+    -- audit log การกระทำผ่าน Manager (ไม่เก็บ secret — ดู services/audit.js ที่กรองก่อนเขียนเสมอ)
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts      INTEGER NOT NULL,          -- วินาที (UTC)
+      actor   TEXT,                      -- sess-xxxxxxxx (ตัวย่อของ session) หรือ anonymous
+      ip      TEXT,
+      action  TEXT NOT NULL,             -- เช่น bot.create, auth.login
+      target  TEXT,                      -- ชื่อ bot / container id ย่อ
+      result  TEXT NOT NULL,             -- ok | fail | denied | warn
+      detail  TEXT                       -- JSON ที่ผ่าน sanitize แล้ว
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, ts);
+
     CREATE TABLE IF NOT EXISTS daily (
       bot_name     TEXT NOT NULL,
       day          TEXT NOT NULL,
@@ -514,7 +528,44 @@ function hasDetailData(botName) {
   return { omada: has('omada_hourly') || has('omada_samples'), hik: has('hik_hourly') || has('hik_samples') };
 }
 
+// ── Audit log ─────────────────────────────────────────────────────────────────
+const AUDIT_RETENTION_DAYS = 365;
+
+// row ต้องผ่าน services/audit.js (sanitize) มาก่อน — ที่นี่เขียนตรงๆ
+function insertAudit({ ts = Math.floor(Date.now() / 1000), actor = null, ip = null, action, target = null, result, detail = null }) {
+  getDb().prepare(`
+    INSERT INTO audit_log (ts, actor, ip, action, target, result, detail) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(ts, actor, ip, action, target, result, detail);
+}
+
+// filters: { action (ตรงตัวหรือ prefix เช่น "bot."), result, limit (≤500), offset } — ใหม่สุดก่อน
+function queryAudit({ action, result, limit = 100, offset = 0 } = {}) {
+  const where = [];
+  const params = [];
+  if (action) { where.push('action LIKE ?'); params.push(`${String(action).replace(/[%_\\]/g, '')}%`); }
+  if (result) { where.push('result = ?'); params.push(String(result)); }
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+  const off = Math.max(parseInt(offset, 10) || 0, 0);
+  const rows = getDb().prepare(`
+    SELECT id, ts, actor, ip, action, target, result, detail FROM audit_log
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY id DESC LIMIT ? OFFSET ?
+  `).all(...params, lim, off);
+  const total = getDb().prepare(`SELECT COUNT(*) AS n FROM audit_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`).get(...params).n;
+  return { total, rows };
+}
+
+function pruneAudit() {
+  const cutoff = Math.floor(Date.now() / 1000) - AUDIT_RETENTION_DAYS * 86400;
+  const info = getDb().prepare('DELETE FROM audit_log WHERE ts < ?').run(cutoff);
+  logger.info(`stats-db: pruneAudit — removed ${info.changes} row(s) older than ${AUDIT_RETENTION_DAYS} days`);
+  return info.changes;
+}
+
 module.exports = {
+  insertAudit,
+  queryAudit,
+  pruneAudit,
   insertDetail,
   rollupDetailHourly,
   pruneDetail,

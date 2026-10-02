@@ -40,6 +40,16 @@ function apiGetStatsSeries(name, range) {
   return fetchJson(`/api/bots/${name}/stats/series?range=${encodeURIComponent(range)}`);
 }
 
+function apiGetAudit(params) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) if (v) q.set(k, v);
+  return fetchJson(`/api/audit?${q}`);
+}
+
+function apiAuthStatus() {
+  return fetchJson('/api/auth/status');
+}
+
 function apiCreateBot(payload) {
   return fetchJson('/api/bots', {
     method: 'POST',
