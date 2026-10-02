@@ -5,6 +5,7 @@ const metaService = require('../services/meta');
 const envConfigService = require('../services/env-config');
 const dailySummaryConfig = require('../services/daily-summary-config');
 const statsDb = require('../services/stats-db');
+const poller = require('../services/poller');
 const logger = require('../services/logger');
 
 const router = express.Router();
@@ -85,8 +86,8 @@ router.post('/bots/:id/test-connection', async (req, res) => {
 
 router.post('/bots', async (req, res) => {
   try {
-    const { name, port, tunnelToken, companyName } = req.body || {};
-    const bot = await dockerService.createBot({ name, port, tunnelToken, companyName });
+    const { name, port, tunnelToken, companyName, image } = req.body || {};
+    const bot = await dockerService.createBot({ name, port, tunnelToken, companyName, image });
     res.status(201).json(bot);
   } catch (err) {
     handleError(res, err, 'Failed to create bot');
@@ -278,6 +279,42 @@ router.get('/bots/:name/stats/daily', (req, res) => {
     res.json(statsDb.getDailyStats(req.params.name, days));
   } catch (err) {
     handleError(res, err, `Failed to get daily stats for ${req.params.name}`);
+  }
+});
+
+// ข้อมูลกราฟสำหรับ stats modal แบบแท็บ (Zabbix / Omada / HikCentral) — ?range=24h|7d|30d
+// แท็บไหนไม่มีข้อมูล/bot ไม่ได้เปิด monitor นั้น → available:false ให้ frontend ซ่อน (ไม่ hardcode ชื่อ bot)
+router.get('/bots/:name/stats/series', (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const name = req.params.name;
+    const range = statsDb.resolveRange(req.query.range).key;
+    const live = poller.getDetailStatus(name); // null = manager ยังไม่เคย poll bot นี้ตั้งแต่ start
+    const monitors = live ? live.monitors : null;
+    const has = statsDb.hasDetailData(name);
+    const base = statsDb.getBaseSeries(name, range);
+
+    const omadaOn = has.omada || (monitors && monitors.includes('omada'));
+    const hikOn = has.hik || (monitors && monitors.includes('hikcentral'));
+    const zabbixOn = (monitors && monitors.includes('zabbix')) || base.points.some((p) => p.problems_total != null || p.hosts_total != null);
+
+    res.json({
+      range,
+      bucketSec: base.bucketSec,
+      detail: live,
+      latest: statsDb.getLatest(name),
+      zabbix: { available: !!zabbixOn, ...base },
+      omada: {
+        available: !!omadaOn,
+        ...(omadaOn ? { ...statsDb.getOmadaSeries(name, range), topClients: statsDb.getTopClients(name, range) } : { points: [], topClients: [] }),
+      },
+      hikcentral: {
+        available: !!hikOn,
+        ...(hikOn ? { ...statsDb.getHikSeries(name, range), topCameras: statsDb.getTopCameras(name, range) } : { points: [], topCameras: [] }),
+      },
+    });
+  } catch (err) {
+    handleError(res, err, `Failed to get stats series for ${req.params.name}`);
   }
 });
 

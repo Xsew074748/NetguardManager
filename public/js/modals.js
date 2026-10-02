@@ -338,6 +338,7 @@ const CONFIG_GROUPS = [
       { key: 'HIKCENTRAL_URL', label: 'HikCentral URL', url: true, placeholder: 'https://hikcentral.example.com' },
       { key: 'HIKCENTRAL_APP_KEY', label: 'App Key (AK)' },
       { key: 'HIKCENTRAL_APP_SECRET', label: 'App Secret (SK)', secret: true },
+      { key: 'HIKCENTRAL_EVENT_TYPES', label: 'รหัสชนิด Event (สำหรับสถิติ)', optional: true, placeholder: 'เช่น 131330,131331 (คั่นด้วย , — ว่าง = ไม่เก็บ event)' },
     ],
     guide: `
       <ol>
@@ -388,7 +389,8 @@ function configGroupDone(cfg, group) {
   if (group.key === 'ai') {
     return configFieldIsSet(cfg, { key: 'ANTHROPIC_API_KEY', secret: true });
   }
-  return group.fields.every((f) => configFieldIsSet(cfg, f));
+  // field optional (เช่น รหัสชนิด Event ของ HikCentral) ไม่นับว่ากลุ่มยังตั้งค่าไม่ครบ
+  return group.fields.filter((f) => !f.optional).every((f) => configFieldIsSet(cfg, f));
 }
 
 function renderConfigField(cfg, f) {
@@ -806,24 +808,30 @@ async function openStatsModal(name) {
   statsModalTitle.textContent = `สถิติ — ${name}`;
   statsModalBody.innerHTML = 'Loading...';
   statsModal.classList.add('show');
+  Object.assign(statsView, { name, tab: 'overview', range: '24h', overview: null, series: null, seriesError: null });
   try {
-    const [summary, daily, samples] = await Promise.all([
+    // series (แท็บ Zabbix/Omada/HikCentral) พังได้โดยไม่ทำให้แท็บภาพรวมเดิมพัง
+    const [summary, daily, samples, series] = await Promise.all([
       apiGetStatsSummary(name),
       apiGetStatsDaily(name, 30),
       apiGetStatsSamples(name, 24),
+      apiGetStatsSeries(name, '24h').catch((err) => { statsView.seriesError = err.message; return null; }),
     ]);
-    renderStatsModal(summary, daily, samples);
+    statsView.overview = { summary, daily, samples };
+    statsView.series = series;
+    renderStatsShell();
   } catch (err) {
     statsModalBody.innerHTML = `<div class="form-error show">โหลดข้อมูลไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
   }
 }
 
 function closeStatsModal() {
+  destroyStatsCharts();
   statsModal.classList.remove('show');
 }
 
-function renderStatsModal(summary, daily, samples) {
-  statsModalBody.innerHTML = `
+function overviewHtml(summary, samples) {
+  return `
     <div class="stat-big-row">
       <div class="stat-big-card"><div class="stat-big-label">24 ชม.</div><div class="stat-big-number">${pctText(summary.last24h)}</div></div>
       <div class="stat-big-card"><div class="stat-big-label">7 วัน</div><div class="stat-big-number">${pctText(summary.last7d)}</div></div>
@@ -853,9 +861,9 @@ function renderStatsModal(summary, daily, samples) {
       </table>
     </div>
   `;
+}
 
-  if (uptimeChart) { uptimeChart.destroy(); uptimeChart = null; }
-  if (problemsChart) { problemsChart.destroy(); problemsChart = null; }
+function drawOverviewCharts(daily, samples) {
 
   const uptimeCtx = document.getElementById('uptimeChartCanvas');
   if (uptimeCtx && window.Chart) {

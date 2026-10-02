@@ -14,4 +14,9 @@ module.exports = {
   // path ของ SQLite DB ภายใน container — mount เป็น named volume แยกจาก /bots
   // (ดูเหตุผลใน CLAUDE.md หัวข้อ "เฟส 5")
   dbPath: process.env.DB_PATH || '/app/data/stats.db',
+  // POLLER_BOTS="test,test2": poll เฉพาะ bot ตามชื่อ (ว่าง = ทุก bot) — ไว้รัน Manager ชั่วคราวเพื่อทดสอบ
+  // โดยไม่ยิง bot production; Manager จริงไม่ตั้งค่านี้
+  pollerBots: (process.env.POLLER_BOTS || '').split(',').map((s) => s.trim()).filter(Boolean),
+  // image ที่อนุญาตให้ระบุต่อ bot ได้ (เฉพาะ bot ทดสอบ — ดู createBot ใน services/docker.js)
+  botImageRepo: 'phattadol358/netguard-ai',
 };

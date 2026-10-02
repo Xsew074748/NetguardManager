@@ -21,6 +21,8 @@ const FIELDS = {
   HIKCENTRAL_URL: { url: true },
   HIKCENTRAL_APP_KEY: {},
   HIKCENTRAL_APP_SECRET: { secret: true },
+  // รหัสชนิด event ที่ bot จะดึงมานับในหน้า stats (จำนวนเต็มคั่นด้วย ,) — ไม่ตั้ง = ไม่เก็บ event
+  HIKCENTRAL_EVENT_TYPES: { csvInts: true },
   AI_PROVIDER: { enumValues: ['claude', 'gemini', 'openai'], default: 'claude' },
   ANTHROPIC_API_KEY: { secret: true },
   GEMINI_API_KEY: { secret: true },
@@ -109,6 +111,10 @@ function writeEnvConfig(botName, updates) {
 
     if (meta.url && cleaned !== '' && !/^https?:\/\//i.test(cleaned)) {
       throw validationError(`Field "${key}" must start with http:// or https://`);
+    }
+
+    if (meta.csvInts && cleaned !== '' && !/^\d{1,12}(\s*,\s*\d{1,12}){0,49}$/.test(cleaned)) {
+      throw validationError(`Field "${key}" must be integers separated by commas (e.g. 131330,131331)`);
     }
 
     if (meta.enumValues && cleaned !== '' && !meta.enumValues.includes(cleaned)) {

@@ -36,6 +36,10 @@ function apiGetStatsSamples(name, hours) {
   return fetchJson(`/api/bots/${name}/stats/samples?hours=${hours}`);
 }
 
+function apiGetStatsSeries(name, range) {
+  return fetchJson(`/api/bots/${name}/stats/series?range=${encodeURIComponent(range)}`);
+}
+
 function apiCreateBot(payload) {
   return fetchJson('/api/bots', {
     method: 'POST',

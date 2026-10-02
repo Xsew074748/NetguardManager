@@ -317,7 +317,26 @@ async function callBot(botName, method, apiPath, timeoutMs = 8000) {
   return { reachable: false, reason: 'unreachable' };
 }
 
-async function createBot({ name, port, tunnelToken, companyName }) {
+// ระบุ image ต่อ bot ได้ "เฉพาะ bot ทดสอบ" (ชื่อขึ้นต้นด้วย test) และต้องเป็น tag ของ repo เดียวกับ bot
+// เช่น phattadol358/netguard-ai:stats-dev — กัน bot จริงถูกสร้างจาก image ที่ไม่ใช่ :latest โดยไม่ตั้งใจ
+// ไม่ส่ง image = ใช้ config.botImage เหมือนเดิม
+const TEST_BOT_NAME_RE = /^test[a-z0-9-]*$/;
+const IMAGE_TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$/;
+
+function resolveBotImage(name, image) {
+  if (image === undefined || image === null || image === '') return config.botImage;
+  if (typeof image !== 'string') throw validationError('Invalid image');
+  if (!TEST_BOT_NAME_RE.test(name)) {
+    throw validationError('ระบุ image เองได้เฉพาะ bot ทดสอบ (ชื่อต้องขึ้นต้นด้วย "test")', 403);
+  }
+  const prefix = `${config.botImageRepo}:`;
+  if (!image.startsWith(prefix) || !IMAGE_TAG_RE.test(image.slice(prefix.length))) {
+    throw validationError(`image ต้องอยู่ในรูป ${prefix}<tag>`);
+  }
+  return image;
+}
+
+async function createBot({ name, port, tunnelToken, companyName, image }) {
   if (!isValidBotName(name)) {
     throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
   }
@@ -330,6 +349,15 @@ async function createBot({ name, port, tunnelToken, companyName }) {
   }
   if (!config.botsHostPath) {
     throw validationError('BOTS_HOST_PATH is not configured on the manager', 503);
+  }
+  const botImage = resolveBotImage(name, image);
+  if (botImage !== config.botImage) {
+    // ไม่ pull ให้เอง — image ทดสอบต้อง build ไว้ใน local เท่านั้น
+    try {
+      await docker.getImage(botImage).inspect();
+    } catch (err) {
+      throw validationError(`ไม่พบ image "${botImage}" ในเครื่อง (ต้อง build ไว้ก่อน ระบบไม่ pull ให้)`, 400);
+    }
   }
 
   try {
@@ -379,7 +407,7 @@ async function createBot({ name, port, tunnelToken, companyName }) {
   let container;
   try {
     container = await docker.createContainer({
-      Image: config.botImage,
+      Image: botImage,
       name: containerName,
       Labels: {
         'netguard.managed': 'true',
@@ -613,5 +641,6 @@ module.exports = {
   attachTunnel,
   detachTunnel,
   isValidBotName,
+  resolveBotImage,
   setEnvValue,
 };

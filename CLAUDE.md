@@ -103,6 +103,34 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - ทดสอบ UI ด้วยสคริปต์ (Edge headless + puppeteer-core) และรัน Manager ชั่วคราวจาก image เดียวกันบนพอร์ตอื่นได้
   (ต้อง --network netguard-net และใน Git Bash ตั้ง MSYS_NO_PATHCONV=1) — อย่าเก็บรหัสผ่านไว้ในไฟล์นี้
 
+## หน้า "สถิติ" แบบแท็บ: ภาพรวม / Zabbix / Omada / HikCentral (งานแยกจากการย้าย production)
+- Manager ไม่เคยคุยกับ Omada/HikCentral เอง — bot (LineBot) เป็นคนยิง แล้ว Manager poll
+  `GET http://netguard-<name>:3000/stats/detail?since=<ts>&eventsSince=<ts>` (lanOnly ฝั่ง bot เพราะมี MAC/ชื่อ client + ชื่อกล้อง)
+  ทุก 5 นาที ต่อท้าย `/stats` เดิม (services/poller.js `pollDetail`) ไม่เพิ่มรอบ poll ใหม่
+- แยก try/catch: detail พัง/timeout/bot image เก่า (404 = "unsupported") ไม่กระทบ uptime ของ bot; log ครั้งเดียวตอนสถานะเปลี่ยน
+- ต้นหน้าต่างเวลาเก็บแยกฝั่ง (`omadaSince` สำหรับ traffic, `hikSince` สำหรับ event) เลื่อนเมื่อฝั่งนั้นเขียน DB สำเร็จเท่านั้น
+  → HikCentral timeout รอบหนึ่งแล้วรอบถัดไปดึงช่วงที่ขาดให้ (bot จำกัดย้อนหลังไม่เกิน 1 ชม.) โดย Omada ไม่นับซ้ำ;
+  manager restart → เริ่มจาก ts ล่าสุดใน DB
+- ตารางใหม่ใน stats.db: `omada_samples`, `omada_top_clients` (top 10 ต่อรอบ, ยอดสะสมต่อ client), `hik_samples`,
+  `hik_top_cameras` (top 5 ต่อรอบ) — ดิบเก็บ **14 วัน**; `omada_hourly`, `hik_hourly` สรุปรายชั่วโมงเก็บ **90 วัน**
+  (rollup ทำทุกครั้งที่เขียน detail + ก่อน prune; prune พร้อม rollupDaily ผ่าน `pruneDetail()`)
+- API: `GET /api/bots/:name/stats/series?range=24h|7d|30d` (24h=ดิบ 5 นาที, 7d=รายชั่วโมง, 30d=ทีละ 6 ชม.) คืน zabbix/omada/hikcentral
+  + `latest` (ค่าดิบล่าสุดสำหรับการ์ด "ตอนนี้") + `detail` (สถานะ poll ล่าสุด); แท็บของระบบที่ไม่มีข้อมูล/ไม่ได้เปิด monitor จะ `available:false` → UI ซ่อน
+- Frontend: public/js/stats-tabs.js (Chart.js ตัวเดิม) — `overviewHtml/drawOverviewCharts` ใน modals.js คือแท็บภาพรวมเดิมไม่เปลี่ยน
+- ข้อควรระวัง SQL: better-sqlite3 ผูกตัวเลข JS เป็น REAL เสมอ → `ts / @b` เป็นหารทศนิยม ต้อง `CAST(@b AS INTEGER)` (เคยพลาด: 30d ได้จุดเท่าข้อมูลดิบ)
+- Top client / Top กล้อง เป็นค่าประมาณ (นับจาก top-N ต่อรอบ; client ใช้ผลต่างของยอดสะสม ค่าลด = session รีเซ็ต)
+- **ยังไม่ยืนยันกับระบบจริง** (ดู LineBot/services/stats-detail.js): ชื่อ field ปริมาณ traffic ของ bucket Omada และ trafficDown/trafficUp ของ client
+  (ไซต์ที่ probe ไม่มี client/traffic เลย → เผื่อ fallback หลายชื่อ; ถ้าไม่ตรงสักชื่อ traffic = null และไม่เขียน window), รหัส `eventTypes` ของ HikCentral
+  (ต้องตั้ง `HIKCENTRAL_EVENT_TYPES` เองใน modal "API"; ไม่ตั้ง = ไม่เก็บ event และ UI แจ้ง banner), ไม่พบ endpoint AP channel utilization และ HikCentral recording/storage → ตัดออก
+- **Manager ระบุ image ต่อ bot ได้เฉพาะ bot ทดสอบ**: `POST /api/bots` รับ `image` (รูป `phattadol358/netguard-ai:<tag>`) เฉพาะชื่อที่ขึ้นต้น `test`
+  และต้อง build ไว้ใน local แล้ว (ไม่ pull ให้) — bot ชื่ออื่นระบุไม่ได้ (403); ไม่ส่ง = `:latest` เหมือนเดิม; ไม่มี UI สำหรับช่องนี้ (ใช้ผ่าน API)
+- `POLLER_BOTS=name1,name2` (env ของ Manager): poll เฉพาะ bot ที่ระบุ ว่าง = ทุก bot — ไว้รัน Manager ชั่วคราวทดสอบโดยไม่ยิง bot production (Manager จริงไม่ตั้ง)
+- วิธีทดสอบแบบไม่แตะ production (ที่ใช้ตอนทำ): build `phattadol358/netguard-ai:stats-dev` (จาก LineBot) + `netguard-manager:stats-dev`,
+  รัน mock-lab เป็น container บน netguard-net (mount โฟลเดอร์ LineBot แบบ ro, `node mock-lab/server.js`), รัน Manager ชั่วคราวพอร์ต 8081
+  (`--network netguard-net`, volume ใหม่สำหรับ /app/data, `POLLER_BOTS=test-stats`, รหัสผ่านชั่วคราว), สร้าง bot `test-stats` ด้วย image stats-dev
+  แล้วชี้ .env ไปที่ mock-lab; ห้ามติด tag `:latest` ให้ image ทดสอบ; ทดสอบเสร็จลบ container/volume/โฟลเดอร์ bots/test-* ทิ้ง
+  (เตือน: Manager จริงจะเห็น bot ทดสอบเพราะ label เดียวกัน และ poll มันด้วยโค้ดเก่าจน bot ถูกลบ)
+
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
   จะใส่ DB เมื่อต้องเก็บสถิติย้อนหลังเท่านั้น

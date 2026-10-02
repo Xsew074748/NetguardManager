@@ -7,6 +7,9 @@ const logger = require('./logger');
 const POLL_INTERVAL_SEC = 5 * 60;
 const MAX_GAP_FILL_ROWS = 288; // 1 วัน (288 * 5 นาที = 24 ชม.) กันกรณี manager ดับนานมาก
 const RETENTION_DAYS = 60;
+// ข้อมูลละเอียดจาก /stats/detail ของ bot (Omada/HikCentral): ดิบทุก 5 นาที เก็บสั้น, สรุปรายชั่วโมงเก็บนานกว่า
+const DETAIL_RAW_RETENTION_DAYS = 14;
+const DETAIL_HOURLY_RETENTION_DAYS = 90;
 
 let db = null;
 
@@ -33,6 +36,46 @@ function initDb() {
       cameras_total  INTEGER, cameras_up  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_samples_bot_ts ON samples(bot_name, ts);
+
+    CREATE TABLE IF NOT EXISTS omada_samples (
+      bot_name TEXT NOT NULL, ts INTEGER NOT NULL,
+      window_sec INTEGER,           -- ช่วงเวลาที่ traffic ครอบคลุม (NULL = ดึง traffic ไม่ได้รอบนี้)
+      clients_total INTEGER, clients_wireless INTEGER, clients_wired INTEGER,
+      clients_2g INTEGER, clients_5g INTEGER, clients_6g INTEGER, clients_guest INTEGER,
+      ap_tx REAL, ap_rx REAL, sw_tx REAL, sw_rx REAL,
+      power_w REAL, ports_total INTEGER, ports_avail INTEGER,
+      PRIMARY KEY (bot_name, ts)
+    );
+    -- top client ต่อ sample (ค่าสะสมตั้งแต่ client เชื่อมต่อ ไม่ใช่ต่อช่วง) — เก็บ 10 อันดับแรกเท่านั้นกัน DB บวม
+    CREATE TABLE IF NOT EXISTS omada_top_clients (
+      bot_name TEXT NOT NULL, ts INTEGER NOT NULL, rank INTEGER NOT NULL,
+      mac TEXT, name TEXT, ap TEXT, down REAL, up REAL,
+      PRIMARY KEY (bot_name, ts, rank)
+    );
+    CREATE TABLE IF NOT EXISTS omada_hourly (
+      bot_name TEXT NOT NULL, hour_ts INTEGER NOT NULL, samples INTEGER,
+      clients_avg REAL, clients_max INTEGER, wireless_avg REAL, wired_avg REAL,
+      c2g_avg REAL, c5g_avg REAL, c6g_avg REAL, guest_avg REAL,
+      ap_tx REAL, ap_rx REAL, sw_tx REAL, sw_rx REAL, power_avg REAL, covered_sec INTEGER,
+      PRIMARY KEY (bot_name, hour_ts)
+    );
+    CREATE TABLE IF NOT EXISTS hik_samples (
+      bot_name TEXT NOT NULL, ts INTEGER NOT NULL, window_sec INTEGER,
+      ev_total INTEGER, ev_motion INTEGER, ev_video_loss INTEGER, ev_tamper INTEGER, ev_other INTEGER,
+      truncated INTEGER DEFAULT 0,
+      PRIMARY KEY (bot_name, ts)
+    );
+    CREATE TABLE IF NOT EXISTS hik_top_cameras (
+      bot_name TEXT NOT NULL, ts INTEGER NOT NULL, rank INTEGER NOT NULL,
+      cam_id TEXT, cam_name TEXT, cnt INTEGER,
+      PRIMARY KEY (bot_name, ts, rank)
+    );
+    CREATE TABLE IF NOT EXISTS hik_hourly (
+      bot_name TEXT NOT NULL, hour_ts INTEGER NOT NULL, samples INTEGER,
+      ev_total INTEGER, ev_motion INTEGER, ev_video_loss INTEGER, ev_tamper INTEGER, ev_other INTEGER,
+      covered_sec INTEGER,
+      PRIMARY KEY (bot_name, hour_ts)
+    );
 
     CREATE TABLE IF NOT EXISTS daily (
       bot_name     TEXT NOT NULL,
@@ -236,7 +279,254 @@ function fillUnknownGaps(botName, lastTs, nowTs) {
   return inserted;
 }
 
+// ── ข้อมูลละเอียด (Omada / HikCentral) ────────────────────────────────────────────
+
+const intOrNull = (v) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Math.round(Number(v)) : null);
+const numOrNull = (v) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+const strOrNull = (v, max = 120) => (v === null || v === undefined ? null : String(v).slice(0, max));
+
+// detail = ผลจาก GET /stats/detail ของ bot — เก็บเฉพาะ section ที่ bot ดึงสำเร็จ (section ที่เป็น null ไม่ถูกเขียนเป็น 0)
+// คืน { omada, omadaTraffic, hik } บอกว่าเขียน section ไหนลงไป (poller ใช้เลื่อนต้นหน้าต่างรอบถัดไป)
+function insertDetail(botName, detail, ts = Math.floor(Date.now() / 1000)) {
+  const out = { omada: false, omadaTraffic: false, hik: false };
+  const d = getDb();
+  const tx = d.transaction(() => {
+    const o = detail && detail.omada;
+    if (o && (o.clients || o.overview || o.traffic)) {
+      const c = o.clients || {}; const ov = o.overview || {}; const t = o.traffic || null;
+      // traffic ที่ field ชื่อไม่รู้จัก (tx/rx = null) ไม่นับว่าครอบคลุมช่วงเวลา
+      const trafficOk = !!(t && t.apTx !== null && t.apTx !== undefined);
+      d.prepare(`
+        INSERT OR REPLACE INTO omada_samples (
+          bot_name, ts, window_sec, clients_total, clients_wireless, clients_wired,
+          clients_2g, clients_5g, clients_6g, clients_guest, ap_tx, ap_rx, sw_tx, sw_rx,
+          power_w, ports_total, ports_avail
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        botName, ts,
+        trafficOk ? intOrNull(detail.windowSec) : null,
+        intOrNull(c.total), intOrNull(c.wireless), intOrNull(c.wired),
+        intOrNull(c.num2g), intOrNull(c.num5g), intOrNull(c.num6g), intOrNull(c.guest),
+        t ? numOrNull(t.apTx) : null, t ? numOrNull(t.apRx) : null, t ? numOrNull(t.swTx) : null, t ? numOrNull(t.swRx) : null,
+        numOrNull(ov.powerConsumption), intOrNull(ov.totalPorts), intOrNull(ov.availablePorts)
+      );
+      const ins = d.prepare(`INSERT OR REPLACE INTO omada_top_clients (bot_name, ts, rank, mac, name, ap, down, up) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      (Array.isArray(o.topClients) ? o.topClients : []).slice(0, 10).forEach((cl, i) => {
+        ins.run(botName, ts, i + 1, strOrNull(cl.mac, 40), strOrNull(cl.name), strOrNull(cl.ap), numOrNull(cl.down) || 0, numOrNull(cl.up) || 0);
+      });
+      out.omada = true;
+      out.omadaTraffic = trafficOk;
+    }
+
+    const h = detail && detail.hikcentral;
+    if (h && h.events) {
+      const e = h.events;
+      d.prepare(`
+        INSERT OR REPLACE INTO hik_samples (bot_name, ts, window_sec, ev_total, ev_motion, ev_video_loss, ev_tamper, ev_other, truncated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(botName, ts, intOrNull(h.windowSec), intOrNull(e.total), intOrNull(e.motion), intOrNull(e.videoLoss),
+        intOrNull(e.tamper), intOrNull(e.other), e.truncated ? 1 : 0);
+      const ins = d.prepare(`INSERT OR REPLACE INTO hik_top_cameras (bot_name, ts, rank, cam_id, cam_name, cnt) VALUES (?, ?, ?, ?, ?, ?)`);
+      (Array.isArray(h.topCameras) ? h.topCameras : []).slice(0, 5).forEach((cm, i) => {
+        ins.run(botName, ts, i + 1, strOrNull(cm.id, 80), strOrNull(cm.name), intOrNull(cm.count) || 0);
+      });
+      out.hik = true;
+    }
+  });
+  tx();
+  if (out.omada || out.hik) rollupDetailHourly(ts - 2 * 3600);
+  return out;
+}
+
+// สรุปรายชั่วโมงจาก sample ดิบ ตั้งแต่ชั่วโมงของ fromTs เป็นต้นไป — INSERT OR REPLACE จึงเรียกซ้ำได้ (ชั่วโมงปัจจุบันอัปเดตต่อเนื่อง)
+function rollupDetailHourly(fromTs) {
+  const from = Math.floor(fromTs / 3600) * 3600;
+  getDb().prepare(`
+    INSERT OR REPLACE INTO omada_hourly (
+      bot_name, hour_ts, samples, clients_avg, clients_max, wireless_avg, wired_avg,
+      c2g_avg, c5g_avg, c6g_avg, guest_avg, ap_tx, ap_rx, sw_tx, sw_rx, power_avg, covered_sec
+    )
+    SELECT bot_name, (ts / 3600) * 3600, COUNT(*), AVG(clients_total), MAX(clients_total), AVG(clients_wireless), AVG(clients_wired),
+           AVG(clients_2g), AVG(clients_5g), AVG(clients_6g), AVG(clients_guest),
+           SUM(ap_tx), SUM(ap_rx), SUM(sw_tx), SUM(sw_rx), AVG(power_w), SUM(window_sec)
+    FROM omada_samples WHERE ts >= ? GROUP BY bot_name, (ts / 3600)
+  `).run(from);
+  getDb().prepare(`
+    INSERT OR REPLACE INTO hik_hourly (bot_name, hour_ts, samples, ev_total, ev_motion, ev_video_loss, ev_tamper, ev_other, covered_sec)
+    SELECT bot_name, (ts / 3600) * 3600, COUNT(*), SUM(ev_total), SUM(ev_motion), SUM(ev_video_loss), SUM(ev_tamper), SUM(ev_other), SUM(window_sec)
+    FROM hik_samples WHERE ts >= ? GROUP BY bot_name, (ts / 3600)
+  `).run(from);
+}
+
+function pruneDetail() {
+  const now = Math.floor(Date.now() / 1000);
+  const rawCut = now - DETAIL_RAW_RETENTION_DAYS * 86400;
+  const hourCut = now - DETAIL_HOURLY_RETENTION_DAYS * 86400;
+  const d = getDb();
+  // สรุปชั่วโมงให้ครบก่อนลบดิบ (กรณี manager ดับข้ามวัน)
+  rollupDetailHourly(rawCut - 3600);
+  let removed = 0;
+  for (const tbl of ['omada_samples', 'omada_top_clients', 'hik_samples', 'hik_top_cameras']) {
+    removed += d.prepare(`DELETE FROM ${tbl} WHERE ts < ?`).run(rawCut).changes;
+  }
+  for (const tbl of ['omada_hourly', 'hik_hourly']) {
+    removed += d.prepare(`DELETE FROM ${tbl} WHERE hour_ts < ?`).run(hourCut).changes;
+  }
+  logger.info(`stats-db: pruneDetail — removed ${removed} row(s) (raw>${DETAIL_RAW_RETENTION_DAYS}d, hourly>${DETAIL_HOURLY_RETENTION_DAYS}d)`);
+  return removed;
+}
+
+// ts ล่าสุดที่เขียน section สำเร็จ — poller ใช้เป็นต้นหน้าต่างรอบแรกหลัง manager restart
+function getLastDetailTs(botName) {
+  const q = (tbl, extra = '') => {
+    const r = getDb().prepare(`SELECT MAX(ts) AS ts FROM ${tbl} WHERE bot_name = ? ${extra}`).get(botName);
+    return r && r.ts != null ? r.ts : null;
+  };
+  return { omadaTraffic: q('omada_samples', 'AND window_sec IS NOT NULL'), hikEvents: q('hik_samples') };
+}
+
+// ── ช่วงเวลาและขนาด bucket ของกราฟ ──
+// 24h → ดิบ 5 นาที | 7d → รายชั่วโมง | 30d → ทีละ 6 ชั่วโมง
+// หมายเหตุ: better-sqlite3 ผูกตัวเลข JS เป็น REAL เสมอ → ต้อง CAST(@b AS INTEGER) ไม่งั้น ts / @b เป็นการหารทศนิยม
+// แล้ว GROUP BY ไม่รวม bucket (ได้จุดเท่าข้อมูลดิบ) — ห้ามใช้ @b ตรง ๆ ในนิพจน์หารจำนวนเต็ม
+const RANGES = { '24h': { sec: 86400, bucket: 300 }, '7d': { sec: 7 * 86400, bucket: 3600 }, '30d': { sec: 30 * 86400, bucket: 6 * 3600 } };
+function resolveRange(range) {
+  return RANGES[range] ? { key: range, ...RANGES[range] } : { key: '24h', ...RANGES['24h'] };
+}
+
+// ชุดพื้นฐานจาก samples เดิม (problems แยกความรุนแรง + จำนวนอุปกรณ์) — ใช้ทั้งแท็บ Zabbix/Omada/HikCentral
+function getBaseSeries(botName, range) {
+  const r = resolveRange(range);
+  const from = Math.floor(Date.now() / 1000) - r.sec;
+  if (r.key === '24h') {
+    return { bucketSec: r.bucket, points: getDb().prepare(`
+      SELECT ts AS t, state, problems_total, problems_disaster, problems_high, problems_average, problems_warning,
+             hosts_total, hosts_up, aps_total, aps_up, switches_total, switches_up, cameras_total, cameras_up
+      FROM samples WHERE bot_name = ? AND ts >= ? ORDER BY ts ASC
+    `).all(botName, from) };
+  }
+  return { bucketSec: r.bucket, points: getDb().prepare(`
+    SELECT (ts / CAST(@b AS INTEGER)) * CAST(@b AS INTEGER) AS t,
+           AVG(problems_total) AS problems_total, AVG(problems_disaster) AS problems_disaster, AVG(problems_high) AS problems_high,
+           AVG(problems_average) AS problems_average, AVG(problems_warning) AS problems_warning,
+           AVG(hosts_total) AS hosts_total, AVG(hosts_up) AS hosts_up, AVG(aps_total) AS aps_total, AVG(aps_up) AS aps_up,
+           AVG(switches_total) AS switches_total, AVG(switches_up) AS switches_up,
+           AVG(cameras_total) AS cameras_total, AVG(cameras_up) AS cameras_up
+    FROM samples WHERE bot_name = @bot AND ts >= @from AND state = 'up'
+    GROUP BY t ORDER BY t ASC
+  `).all({ b: r.bucket, bot: botName, from }) };
+}
+
+function getOmadaSeries(botName, range) {
+  const r = resolveRange(range);
+  const from = Math.floor(Date.now() / 1000) - r.sec;
+  if (r.key === '24h') {
+    return { bucketSec: r.bucket, points: getDb().prepare(`
+      SELECT ts AS t, clients_total AS clients, clients_total AS clients_max, clients_wireless AS wireless, clients_wired AS wired,
+             clients_2g AS c2g, clients_5g AS c5g, clients_6g AS c6g, clients_guest AS guest,
+             ap_tx, ap_rx, sw_tx, sw_rx, power_w AS power, window_sec
+      FROM omada_samples WHERE bot_name = ? AND ts >= ? ORDER BY ts ASC
+    `).all(botName, from) };
+  }
+  return { bucketSec: r.bucket, points: getDb().prepare(`
+    SELECT (hour_ts / CAST(@b AS INTEGER)) * CAST(@b AS INTEGER) AS t, AVG(clients_avg) AS clients, MAX(clients_max) AS clients_max, AVG(wireless_avg) AS wireless, AVG(wired_avg) AS wired,
+           AVG(c2g_avg) AS c2g, AVG(c5g_avg) AS c5g, AVG(c6g_avg) AS c6g, AVG(guest_avg) AS guest,
+           SUM(ap_tx) AS ap_tx, SUM(ap_rx) AS ap_rx, SUM(sw_tx) AS sw_tx, SUM(sw_rx) AS sw_rx, AVG(power_avg) AS power, SUM(covered_sec) AS window_sec
+    FROM omada_hourly WHERE bot_name = @bot AND hour_ts >= @from GROUP BY t ORDER BY t ASC
+  `).all({ b: r.bucket, bot: botName, from }) };
+}
+
+function getHikSeries(botName, range) {
+  const r = resolveRange(range);
+  const from = Math.floor(Date.now() / 1000) - r.sec;
+  if (r.key === '24h') {
+    return { bucketSec: r.bucket, points: getDb().prepare(`
+      SELECT ts AS t, ev_total AS total, ev_motion AS motion, ev_video_loss AS video_loss, ev_tamper AS tamper, ev_other AS other, window_sec
+      FROM hik_samples WHERE bot_name = ? AND ts >= ? ORDER BY ts ASC
+    `).all(botName, from) };
+  }
+  return { bucketSec: r.bucket, points: getDb().prepare(`
+    SELECT (hour_ts / CAST(@b AS INTEGER)) * CAST(@b AS INTEGER) AS t, SUM(ev_total) AS total, SUM(ev_motion) AS motion, SUM(ev_video_loss) AS video_loss,
+           SUM(ev_tamper) AS tamper, SUM(ev_other) AS other, SUM(covered_sec) AS window_sec
+    FROM hik_hourly WHERE bot_name = @bot AND hour_ts >= @from GROUP BY t ORDER BY t ASC
+  `).all({ b: r.bucket, bot: botName, from }) };
+}
+
+// อันดับ client ตามปริมาณที่ "เพิ่มขึ้น" ในช่วงเวลา — ค่าใน DB เป็นยอดสะสมตั้งแต่เชื่อมต่อ
+// จึงรวมเฉพาะส่วนต่างระหว่าง sample ที่ติดกัน (ค่าลดลง = session รีเซ็ต นับค่าใหม่เป็นส่วนเพิ่ม)
+// ประมาณการ: client ต้องอยู่ใน top 10 ของ sample หลายรอบจึงมีส่วนต่าง; จำกัดช่วงไม่เกิน raw retention
+function getTopClients(botName, range, n = 10) {
+  const r = resolveRange(range);
+  const sec = Math.min(r.sec, DETAIL_RAW_RETENTION_DAYS * 86400);
+  const from = Math.floor(Date.now() / 1000) - sec;
+  const rows = getDb().prepare(`
+    SELECT ts, mac, name, ap, down, up FROM omada_top_clients
+    WHERE bot_name = ? AND ts >= ? ORDER BY ts ASC, rank ASC
+  `).all(botName, from);
+  const delta = (now, last) => (last === null ? 0 : (now >= last ? now - last : now));
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = row.mac || row.name || '?';
+    const cur = byKey.get(key) || { mac: row.mac, name: row.name, ap: row.ap, down: 0, up: 0, lastDown: null, lastUp: null };
+    cur.down += delta(row.down || 0, cur.lastDown);
+    cur.up   += delta(row.up || 0, cur.lastUp);
+    cur.lastDown = row.down || 0;
+    cur.lastUp = row.up || 0;
+    cur.name = row.name || cur.name;
+    cur.ap = row.ap || cur.ap;
+    byKey.set(key, cur);
+  }
+  return [...byKey.values()]
+    .map(({ mac, name, ap, down, up }) => ({ mac, name, ap, down, up, total: down + up }))
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, n);
+}
+
+function getTopCameras(botName, range, n = 5) {
+  const r = resolveRange(range);
+  const sec = Math.min(r.sec, DETAIL_RAW_RETENTION_DAYS * 86400);
+  const from = Math.floor(Date.now() / 1000) - sec;
+  return getDb().prepare(`
+    SELECT cam_id AS id, MAX(cam_name) AS name, SUM(cnt) AS count FROM hik_top_cameras
+    WHERE bot_name = ? AND ts >= ? GROUP BY cam_id ORDER BY count DESC LIMIT ?
+  `).all(botName, from, n);
+}
+
+// sample ดิบล่าสุด (ไม่ขึ้นกับ range) — การ์ด "ตอนนี้" ในหน้า stats ใช้ค่านี้ ไม่ใช่ค่าเฉลี่ยของ bucket ท้ายสุดของ 7d/30d
+function getLatest(botName) {
+  const d = getDb();
+  return {
+    base: d.prepare(`
+      SELECT ts AS t, problems_total, hosts_total, hosts_up, aps_total, aps_up, switches_total, switches_up, cameras_total, cameras_up
+      FROM samples WHERE bot_name = ? AND state = 'up' ORDER BY ts DESC LIMIT 1
+    `).get(botName) || null,
+    omada: d.prepare(`
+      SELECT ts AS t, clients_total AS clients, clients_wireless AS wireless, clients_wired AS wired, power_w AS power
+      FROM omada_samples WHERE bot_name = ? AND clients_total IS NOT NULL ORDER BY ts DESC LIMIT 1
+    `).get(botName) || null,
+  };
+}
+
+function hasDetailData(botName) {
+  const d = getDb();
+  const has = (tbl) => !!d.prepare(`SELECT 1 FROM ${tbl} WHERE bot_name = ? LIMIT 1`).get(botName);
+  return { omada: has('omada_hourly') || has('omada_samples'), hik: has('hik_hourly') || has('hik_samples') };
+}
+
 module.exports = {
+  insertDetail,
+  rollupDetailHourly,
+  pruneDetail,
+  getLastDetailTs,
+  getBaseSeries,
+  getOmadaSeries,
+  getHikSeries,
+  getTopClients,
+  getTopCameras,
+  hasDetailData,
+  getLatest,
+  resolveRange,
   initDb,
   closeDb,
   insertSample,
