@@ -1,25 +1,60 @@
 // duration (ms) ปรับได้ต่อข้อความ — ข้อความยาว/สำคัญกว่าปกติ (เช่นคำเตือน
 // restart vs recreate) ต้องการเวลาอ่านนานกว่า 4 วิ เริ่มต้น
+// duration = 0 → ไม่ปิดเอง (ค้างจนผู้ใช้กด ×) ใช้กับ error และข้อความที่ต้องอ่านให้จบ
+// ทุก toast มีปุ่ม × ปิดเองได้
+const MAX_STICKY_TOASTS = 4; // toast ที่ค้าง (duration = 0) พร้อมกันได้ไม่เกินนี้ — เกินแล้วตัดตัวเก่าสุดออก
+
+function dismissToast(el) {
+  if (el._toastDismissed) return;
+  el._toastDismissed = true;
+  clearTimeout(el._toastTimer);
+  el.classList.add('toast-out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+}
+
 function showToast(message, type, duration = 4000) {
+  const sticky = duration === 0;
+
+  if (sticky) {
+    const live = [...toastContainer.querySelectorAll('.toast-sticky')].filter((t) => !t._toastDismissed);
+    // ข้อความเหมือนกันเป๊ะที่ยังค้างอยู่ → ไม่สร้างซ้ำ (กัน error เดิมกองเต็มจอตอนกดซ้ำ)
+    const dup = live.find((t) => t.dataset.msg === message);
+    if (dup) return dup;
+    // เกินลิมิต → ตัดตัวเก่าสุดออกทันที (ไม่รอ animation เพื่อให้นับถูกเสมอ)
+    for (let i = 0; i <= live.length - MAX_STICKY_TOASTS; i++) live[i].remove();
+  }
+
   const el = document.createElement('div');
-  el.className = `toast ${type || 'info'}`;
+  el.className = `toast ${type || 'info'}${sticky ? ' toast-sticky' : ''}`;
+  if (sticky) {
+    el.dataset.msg = message;
+    el.setAttribute('role', 'alert');
+  }
 
   const msg = document.createElement('span');
   msg.className = 'toast-msg';
   msg.textContent = message;
   el.appendChild(msg);
 
-  const progress = document.createElement('div');
-  progress.className = 'toast-progress';
-  progress.style.animationDuration = `${duration}ms`;
-  el.appendChild(progress);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'ปิดข้อความ');
+  close.textContent = '×';
+  close.addEventListener('click', () => dismissToast(el));
+  el.appendChild(close);
+
+  if (!sticky) {
+    const progress = document.createElement('div');
+    progress.className = 'toast-progress';
+    progress.style.animationDuration = `${duration}ms`;
+    el.appendChild(progress);
+  }
 
   toastContainer.appendChild(el);
 
-  setTimeout(() => {
-    el.classList.add('toast-out');
-    el.addEventListener('animationend', () => el.remove(), { once: true });
-  }, duration);
+  if (!sticky) el._toastTimer = setTimeout(() => dismissToast(el), duration);
+  return el;
 }
 
 function prefersReducedMotion() {

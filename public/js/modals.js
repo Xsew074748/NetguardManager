@@ -64,7 +64,7 @@ async function runDetachTunnel(name, btn) {
     await apiDetachTunnel(name);
     showToast(`ลบ tunnel ของ "${name}" สำเร็จ`, 'success');
   } catch (err) {
-    showToast(`ลบ tunnel ของ "${name}" ไม่สำเร็จ: ${err.message}`, 'error');
+    showToast(`ลบ tunnel ของ "${name}" ไม่สำเร็จ: ${err.message}`, 'error', 0);
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
@@ -81,7 +81,7 @@ async function runBotAction(action, id, btn) {
     await apiBotAction(id, action);
     showToast(`${labels[action] || action} bot สำเร็จ`, 'success');
   } catch (err) {
-    showToast(`${labels[action] || action} bot ไม่สำเร็จ: ${err.message}`, 'error');
+    showToast(`${labels[action] || action} bot ไม่สำเร็จ: ${err.message}`, 'error', 0);
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
@@ -788,7 +788,7 @@ async function submitRemoveBot() {
     showToast(`ลบ bot "${name}" สำเร็จ${deleteFiles ? ' (รวมไฟล์)' : ''}`, 'success');
     loadBots();
   } catch (err) {
-    showToast(`ลบ bot "${name}" ไม่สำเร็จ: ${err.message}`, 'error');
+    showToast(`ลบ bot "${name}" ไม่สำเร็จ: ${err.message}`, 'error', 0);
   } finally {
     removeConfirmBtn.disabled = false;
     removeConfirmBtn.textContent = 'ลบ';
@@ -928,15 +928,14 @@ async function submitPullImage(btn) {
     await apiPullImage();
     // pull image เข้า local cache เฉยๆ ไม่ได้สลับ container ที่รันอยู่ไปใช้ image ใหม่
     // (Docker ผูก container กับ image ID ตอน create ไม่ใช่ตอน start/restart) — เตือนให้ชัด
-    // ว่า restart อย่างเดียวไม่พอ ต้อง "ลบแล้วสร้างใหม่" เท่านั้น ใช้ duration ยาวกว่าปกติ
-    // เพราะข้อความยาว อ่านทันด้วย type 'info'
+    // ว่า restart อย่างเดียวไม่พอ ต้อง "ลบแล้วสร้างใหม่" เท่านั้น — duration 0 = ค้างจนผู้ใช้กด × (ข้อความยาว ต้องอ่านให้จบ)
     showToast(
       'Pull image สำเร็จ — bot ที่ต้องการใช้เวอร์ชันใหม่ต้อง "ลบแล้วสร้างใหม่" (ไม่ใช่แค่ Restart) กด ⋯ → ลบ Bot (ไม่ลบไฟล์) แล้วสร้างใหม่ด้วยชื่อ/port เดิม',
       'info',
-      9000
+      0
     );
   } catch (err) {
-    showToast(`อัปเดต image ไม่สำเร็จ: ${err.message}`, 'error');
+    showToast(`อัปเดต image ไม่สำเร็จ: ${err.message}`, 'error', 0);
   } finally {
     btn.disabled = false;
     btn.textContent = 'อัปเดต Image';
