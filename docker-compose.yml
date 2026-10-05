@@ -4,7 +4,10 @@ services:
     container_name: netguard-manager
     restart: always
     ports:
-      - "8080:8080"
+      # bind เฉพาะ loopback — การเข้าผ่าน Tailscale ทำด้วย `tailscale serve --bg --tcp 8080 tcp://127.0.0.1:8080`
+      # (config เก็บใน tailscaled ไม่ผูกลำดับ start กับ Docker)
+      # ห้ามเปลี่ยนเป็น bind IP ของ Tailscale ตรงๆ: ถ้า Docker start ก่อน Tailscale ขึ้น binding จะหายเงียบๆ และไม่กลับมาเอง
+      - "127.0.0.1:8080:8080"
     env_file: .env
     environment:
       - BOTS_ROOT=/bots
