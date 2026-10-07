@@ -4,3 +4,9 @@ node_modules/
 .DS_Store
 *.bak
 *.bak/
+
+# บันทึกภายในส่วนตัว (ไม่ commit)
+CLAUDE.local.md
+
+# backup ของ docker-compose (ห้าม commit)
+docker-compose.yml.bak-*

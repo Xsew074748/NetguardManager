@@ -51,7 +51,9 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 
 ## ความปลอดภัย
 - docker.sock = สิทธิ์เทียบเท่า root บน host
-- เข้าถึงเฉพาะ Tailscale VPN (100.64.0.0/10) + private LAN
+- เข้าถึงได้เฉพาะผ่าน Tailscale VPN (tailnet) หรือจากเครื่อง Manager เองที่ 127.0.0.1 เท่านั้น
+  **LAN เข้าไม่ได้แล้ว** (port 8080 bind 127.0.0.1) — ก่อนงาน network layer นี้ Tailscale ไม่ได้ถูกติดตั้งจริง
+  ข้อความเดิมที่ว่า "เข้าได้เฉพาะ Tailscale + LAN" ไม่ตรงความจริง (ดูหัวข้อ "Network layer" ด้านล่าง)
 - ห้ามผูก Cloudflare Tunnel เข้า manager เด็ดขาด
 - guard 2 ชั้น: network range + session auth (timingSafeEqual)
 - rate limit login 5 ครั้ง/15 นาที
@@ -146,7 +148,8 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - รหัสเดิมที่สั้นกว่า 12 ตัว: migrate ให้แต่ติดธง weak ใน auth.json → UI แสดง banner เตือน + audit `auth.weak-password` (เตือนอย่างเดียว ไม่บังคับ)
 - **Rate limit login** (middleware/login-limit.js, express-rate-limit ตัวเดิม): นับเฉพาะ login ที่ผิด; 5 ครั้ง/15 นาที/IP **และ** เพดานรวม 20 ครั้ง/15 นาทีทั้งระบบ
   ⚠️ บน Docker Desktop ทุก client ถูก NAT เป็น IP เดียว (`::ffff:172.18.0.1`) → "ต่อ IP" แยกคนไม่ได้ และ networkGuard ชั้นแรกผ่านเสมอ;
-  ใครเข้าพอร์ต 8080 ได้ก็ล็อกแอดมินออก 15 นาทีได้ด้วยการส่งรหัสผิดรวมครบ — ทางแก้จริงคือ network layer (bind พอร์ตเฉพาะ IP / firewall) ยังไม่ได้ทำ (งานแยก)
+  ใครเข้าพอร์ต 8080 ได้ก็ล็อกแอดมินออก 15 นาทีได้ด้วยการส่งรหัสผิดรวมครบ — network layer ทำแล้ว (bind 127.0.0.1 + tailscale serve, ดูหัวข้อ "Network layer")
+  แต่ข้อจำกัดเรื่องแยกคนยังเหลืออยู่ (ดู "ข้อจำกัดที่เหลือ" ในหัวข้อนั้น)
   ล็อกอยู่ในหน่วยความจำ (restart Manager = รีเซ็ต)
 - Session: Map ในหน่วยความจำ 24 ชม. (หายเมื่อ restart — deploy ทีไรต้อง login ใหม่), กวาด session หมดอายุทุก 10 นาที
 - **Audit log**: ตาราง `audit_log` ใน stats.db (เก็บ 365 วัน, prune ใน checkDailyRollup) — services/audit.js
@@ -158,6 +161,20 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   actor = `sess-xxxxxxxx` (hash ตัดสั้นของ session; ใช้รหัสผ่านร่วมกันจึงระบุตัวบุคคลไม่ได้) และ IP จะเป็น gateway เดียวกันบน Docker Desktop
   ดูได้ที่ปุ่ม "Audit log" ใน UI หรือ `GET /api/audit?action=bot.&result=fail&limit=` (ต้อง login; การดูไม่ถูกบันทึกซ้ำ)
 - ต้อง login ใหม่ทุกครั้งหลัง deploy; **ขั้น deploy: login ครั้งแรกด้วยรหัสเดิมเพื่อให้ระบบย้าย hash** (ถ้าใช้รหัสผิดจะไม่ย้ายและไม่เสียหายอะไร)
+
+## Network layer (สถานะจริง ณ 2026-10-05)
+- Tailscale ติดตั้งบนเครื่อง Manager แล้ว (ปิด key expiry แล้ว) — IP tailnet และชื่อบัญชีอยู่ใน CLAUDE.local.md (ไม่ถูก commit)
+- `docker-compose.yml`: port mapping เป็น `"127.0.0.1:8080:8080"` — bind เฉพาะ loopback ปิดช่องทาง LAN ทั้งหมด
+- เข้าจาก VPN ผ่าน `tailscale serve --bg --tcp 8080 tcp://127.0.0.1:8080`
+  (config เก็บใน tailscaled ไม่ผูกกับ Docker จึงไม่ขึ้นกับลำดับ start)
+- ⚠️ **ห้าม bind port mapping เป็น IP ของ Tailscale ตรงๆ** (เช่น `"<tailscale-ip>:8080:8080"`)
+  ทดสอบแล้ว: ถ้า Tailscale down แล้วขึ้นใหม่ (เช่นตอน reboot) Docker จะตัด binding ทิ้งเงียบๆ
+  และไม่กลับมาเอง ต้อง recreate container — ให้ใช้ `tailscale serve` แทนเสมอ
+- Rollback: `docker-compose.yml.bak-20261003-114130` (ไฟล์ compose ก่อนแก้ ที่ bind `"8080:8080"` ทุก interface)
+  กู้ด้วยการ copy ทับ `docker-compose.yml` แล้ว `docker compose up -d` (ไฟล์ .bak ยังไม่ได้ commit เข้า git)
+- **ข้อจำกัดที่เหลือ**: rate-limit ต่อ IP ยังแยกคนไม่ได้ เพราะ Docker Desktop NAT ทุก request จาก
+  Tailscale/loopback เป็น IP เดียวกัน — ถ้าจะแยกคนในวง Tailscale ต้องตั้ง ACL ใน Tailscale admin console
+  (งานแยกต่างหาก ยังไม่ได้ทำ)
 
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
@@ -175,7 +192,8 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - express.static เสิร์ฟไฟล์ทะลุ auth guard ได้
   → guard route / และ /index.html แยกต่างหาก
 - cookie secure flag: อย่าบังคับใน production
-  เพราะ Tailscale/LAN ไม่มี TLS
+  เพราะทางเข้าจริงคือ HTTP ธรรมดา (127.0.0.1 และ tailscale serve แบบ TCP ผ่าน tailnet ที่ไม่มี TLS ชั้น HTTP;
+  ตัว tailnet เข้ารหัส WireGuard ให้อยู่แล้ว) — LAN เข้าไม่ได้แล้ว
 - docker-compose environment ต้องใช้ ${VAR} จาก .env
   ไม่ hardcode ไม่งั้นแก้ .env แล้วไม่มีผล
 - curl normalize ../ ทิ้งก่อนถึง server
@@ -204,13 +222,21 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   "OMADA_URL=https://..." คือมี key ซ้อนอยู่ในค่า ไม่ใช่บั๊กจาก config
   modal) — ยังไม่ได้แก้ เพราะไม่อยู่ใน scope ของงานตอนนั้น ควรแก้ทีหลัง
 - Docker container ผูกกับ image ID ตอน create ไม่ใช่ตอน start/restart
-  → ปุ่ม "อัปเดต Image" ใน Manager แค่ pull image ใหม่เข้า local cache
+  → ปุ่ม "อัปเดต Image" ใน Manager แค่ pull image ใหม่เข้า local cache  (⚠️ pull นี้ไม่ส่ง registry auth และทับ tag :latest ในเครื่อง — ดู 3 ข้อใหม่ถัดจากบทเรียนนี้)
   → container ที่รันอยู่แล้วไม่สลับไปใช้ image ใหม่โดยอัตโนมัติ
   → ต้อง remove+create (ผ่าน Manager: ลบ bot แบบไม่ลบไฟล์ แล้วสร้างใหม่
     ด้วยชื่อ/port เดิม — .env/data/meta.json จะยังอยู่ครบ) ไม่ใช่แค่ restart
   → วิธีตรวจว่า deploy จริงหรือยัง: docker inspect <container> --format
     "{{.Image}}" เทียบกับ docker images <repo> --format "{{.ID}}" ล่าสุด
     (อย่าเชื่อแค่ toast message ที่อาจกำกวม — ต้องเช็ค image ID ตรงๆ)
+- ปุ่ม "อัปเดต Image" เรียก `docker.pull(config.botImage)` ของ dockerode **โดยไม่ส่ง registry auth** (services/docker.js `pullImage`):
+  - ถ้า image ใหม่ยังไม่ได้ push ขึ้น Docker Hub จะดึง `:latest` เก่ามาทับ tag ในเครื่อง → image ที่ build ไว้เองกลายเป็นไม่มี tag และ recreate รอบหน้ากลับไปใช้ของเก่า (container ที่รันอยู่ไม่เปลี่ยนเพราะผูกกับ image ID)
+  - ถ้า repo บน Docker Hub เป็น private จะล้มด้วย "pull access denied" (container เดิมไม่เสียหาย); `ensureImage` ตอนสร้างบอท/tunnel ก็ pull ไม่ได้เช่นกันถ้า image ไม่มีในเครื่อง
+  - ทางรองรับถ้าจะทำ repo เป็น private: ใส่ `authconfig` (user + access token แบบอ่านอย่างเดียวจาก env) ใน `docker.pull(image, { authconfig }, cb)` — ยังไม่ได้ทำ; ระหว่างนี้ให้ build/tag/recreate เอง และตรวจ `docker images` ก่อน/หลังกด
+- ฟอร์ม bot-config (`FIELDS` whitelist ใน services/env-config.js) แก้ได้เฉพาะคีย์ที่อยู่ใน whitelist; คีย์อื่นใน .env **ถูกรักษาไว้** ตอนบันทึก (`setEnvValue` แก้เฉพาะบรรทัด `KEY=` ที่ตรงกัน ไม่มี = ต่อท้าย บรรทัดอื่นคงเดิม เขียนแบบ atomic)
+  — ตัวแปรของฟีเจอร์ที่ไม่อยู่ใน FIELDS (เช่นกลุ่ม `HIKCENTRAL_TEMP_ALARM_*` ของ LineBot) จึงแก้จากหน้านี้ไม่ได้ ต้องแก้ไฟล์ .env เอง หรือเพิ่มใน FIELDS (แก้โค้ด Manager)
+- `.env` ถูก mount เข้า container เป็นไฟล์เดี่ยว: การเขียน atomic ทำให้ container เห็นไฟล์เก่าจนกว่าจะ restart
+  "บันทึก" = ไม่ restart (ค่าใหม่ยังไม่มีผล); "บันทึกและ Restart" = **restart production จริง** ใช้เมื่อพร้อมเท่านั้น
 
 ## คำสั่งที่ใช้บ่อย
 cd "D:\Project Code\RealCode\NetguardManager"
