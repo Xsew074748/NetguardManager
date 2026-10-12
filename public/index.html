@@ -41,6 +41,7 @@
   </button>
   <div class="sidebar-footer">
     <div class="sidebar-user">Admin</div>
+    <button class="btn btn-ghost" id="changePasswordBtn"><span class="btn-icon-glyph">&#128273;</span><span class="btn-text">เปลี่ยนรหัสผ่าน</span></button>
     <button class="btn btn-ghost" id="logoutBtn"><span class="btn-icon-glyph">&#9211;</span><span class="btn-text">ออกจากระบบ</span></button>
   </div>
 </aside>
@@ -64,7 +65,8 @@
   </div>
 
   <div class="content">
-    <div class="stats-banner" id="weakPasswordBanner" hidden>รหัสผ่าน Manager สั้นกว่า 12 ตัวอักษร — ควรเปลี่ยนด้วย <code>docker exec -it netguard-manager node scripts/set-password.js</code> (พิมพ์รหัสในเทอร์มินัลเท่านั้น)</div>
+    <div class="stats-banner" id="weakPasswordBanner" hidden>รหัสผ่าน Manager สั้นกว่า 12 ตัวอักษร — <button type="button" class="btn btn-secondary" id="weakPasswordChangeBtn">เปลี่ยนรหัสผ่านเลย</button> หรือใช้ <code>docker exec -it netguard-manager node scripts/set-password.js</code> (พิมพ์รหัสในเทอร์มินัลเท่านั้น)</div>
+    <div class="stats-banner" id="envHashStaleBanner" hidden>รหัสผ่านถูกเปลี่ยนแล้ว แต่ <code>MANAGER_PASSWORD_HASH</code> ใน <code>.env</code> ยังเป็นของเดิม (ล้าสมัย) — ถ้าลบ <code>auth.json</code> ระบบจะกลับไปใช้รหัสเก่านั้น (ใช้เป็นทางกู้ได้ แต่อย่าลืมว่ารหัสเก่ายังมีผล)</div>
     <div class="summary-bar" id="summaryBar">
       <button type="button" class="summary-card" id="cardTotal" data-filter="">
         <div class="summary-label">Bot ทั้งหมด</div>
@@ -277,6 +279,39 @@
   </div>
 </div>
 
+<!-- Change password modal -->
+<div class="modal-overlay" id="changePasswordModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>เปลี่ยนรหัสผ่าน</h3>
+      <button class="modal-close" id="changePasswordModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-error" id="changePasswordError"></div>
+      <form id="changePasswordForm">
+        <div class="field">
+          <label for="pwCurrent">รหัสผ่านเดิม</label>
+          <input type="password" id="pwCurrent" name="current-password" autocomplete="current-password" required>
+        </div>
+        <div class="field">
+          <label for="pwNew">รหัสผ่านใหม่</label>
+          <input type="password" id="pwNew" name="new-password" autocomplete="new-password" required>
+          <div class="field-hint">อย่างน้อย 12 ตัวอักษร ไม่ซ้ำรหัสเดิม และไม่ใช่ตัวอักษรตัวเดียวซ้ำกันทั้งสาย</div>
+        </div>
+        <div class="field">
+          <label for="pwConfirm">ยืนยันรหัสผ่านใหม่</label>
+          <input type="password" id="pwConfirm" name="confirm-password" autocomplete="new-password" required>
+        </div>
+        <div class="field-hint">หลังเปลี่ยน ระบบจะออกจากระบบเครื่องอื่นทั้งหมด (เครื่องนี้ยังอยู่ต่อ)</div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="changePasswordCancelBtn">ยกเลิก</button>
+      <button class="btn btn-teal" id="changePasswordSubmitBtn">เปลี่ยนรหัสผ่าน</button>
+    </div>
+  </div>
+</div>
+
 <!-- Remove confirm modal -->
 <div class="modal-overlay" id="removeModal">
   <div class="modal">
@@ -369,6 +404,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/render.js"></script>
+<script src="js/password-form.js"></script>
 <script src="js/stats-tabs.js"></script>
 <script src="js/audit-ui.js"></script>
 <script src="js/modals.js"></script>

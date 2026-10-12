@@ -49,4 +49,6 @@ auditModal.addEventListener('click', (e) => { if (e.target === auditModal) audit
 // banner เตือนรหัสผ่านสั้น (เตือนอย่างเดียว ไม่บังคับ)
 apiAuthStatus().then((s) => {
   if (s && s.weakPassword) document.getElementById('weakPasswordBanner').hidden = false;
+  // .env ยังมี hash ของรหัสเก่า (หลังเปลี่ยนรหัสด้วยเว็บ/CLI) — แจ้งให้รู้ว่าเป็นทางกู้ที่ล้าสมัย
+  if (s && s.envHashStale) document.getElementById('envHashStaleBanner').hidden = false;
 }).catch(() => { /* ไม่มี banner ก็ไม่เป็นไร */ });

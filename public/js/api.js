@@ -114,6 +114,24 @@ function apiPullImage() {
   return fetchJson('/api/image/pull', { method: 'POST' });
 }
 
+// เปลี่ยนรหัสผ่าน: ห้ามใช้ fetchJson ที่เด้งไป login.html เมื่อได้ 401 — รหัสเดิมผิดตอบ 403 และต้องแสดงข้อความในฟอร์ม
+// ต้องมี X-Requested-With (middleware/csrf-guard.js); รหัสไปกับ body เท่านั้น ไม่ขึ้น URL
+async function apiChangePassword(current, next) {
+  const res = await fetch('/api/auth/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+    body: JSON.stringify({ current, next }),
+  });
+  let data = null;
+  try { data = await res.json(); } catch (err) { /* no body */ }
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+    throw new Error('unauthorized');
+  }
+  if (!res.ok) throw new Error((data && data.error) || `request failed: ${res.status}`);
+  return data;
+}
+
 function apiLogout() {
   return fetch('/api/auth/logout', { method: 'POST' });
 }

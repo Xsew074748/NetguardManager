@@ -942,6 +942,62 @@ async function submitPullImage(btn) {
   }
 }
 
+// ── เปลี่ยนรหัสผ่าน ──
+const changePasswordModal = document.getElementById('changePasswordModal');
+const changePasswordError = document.getElementById('changePasswordError');
+const pwFields = ['pwCurrent', 'pwNew', 'pwConfirm'].map((id) => document.getElementById(id));
+
+function clearPasswordFields() {
+  pwFields.forEach((el) => { el.value = ''; });
+}
+
+function openChangePasswordModal() {
+  changePasswordError.classList.remove('show');
+  clearPasswordFields();
+  changePasswordModal.classList.add('show');
+  pwFields[0].focus();
+}
+
+function closeChangePasswordModal() {
+  clearPasswordFields();
+  changePasswordModal.classList.remove('show');
+}
+
+async function submitChangePassword() {
+  changePasswordError.classList.remove('show');
+  const [cur, nxt, cfm] = pwFields;
+  const problem = validatePasswordForm({ current: cur.value, next: nxt.value, confirm: cfm.value });
+  if (problem) {
+    changePasswordError.textContent = problem;
+    changePasswordError.classList.add('show');
+    return;
+  }
+  const btn = document.getElementById('changePasswordSubmitBtn');
+  btn.disabled = true;
+  try {
+    const result = await apiChangePassword(cur.value, nxt.value);
+    clearPasswordFields();
+    closeChangePasswordModal();
+    document.getElementById('weakPasswordBanner').hidden = true;
+    document.getElementById('envHashStaleBanner').hidden = !(result && result.envHashStale);
+    showToast('เปลี่ยนรหัสผ่านแล้ว — เครื่องอื่นถูกออกจากระบบ', 'success');
+  } catch (err) {
+    changePasswordError.textContent = err.message;
+    changePasswordError.classList.add('show');
+    cur.value = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('changePasswordBtn').addEventListener('click', openChangePasswordModal);
+document.getElementById('weakPasswordChangeBtn').addEventListener('click', openChangePasswordModal);
+document.getElementById('changePasswordModalClose').addEventListener('click', closeChangePasswordModal);
+document.getElementById('changePasswordCancelBtn').addEventListener('click', closeChangePasswordModal);
+document.getElementById('changePasswordSubmitBtn').addEventListener('click', submitChangePassword);
+document.getElementById('changePasswordForm').addEventListener('submit', (e) => { e.preventDefault(); submitChangePassword(); });
+changePasswordModal.addEventListener('click', (e) => { if (e.target === changePasswordModal) closeChangePasswordModal(); });
+
 async function submitLogout() {
   await apiLogout();
   window.location.href = '/login.html';
