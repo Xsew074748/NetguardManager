@@ -143,7 +143,7 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - **ไม่ล็อกตัวเอง**: auth.json หาย/เสีย/เขียนไม่ได้ → fall back ไป .env (login ได้ด้วยรหัสเดิม); rollback ไป image เก่าได้เพราะ .env ไม่เปลี่ยน
   กู้ฉุกเฉิน: `docker exec netguard-manager rm /app/data/auth.json` แล้ว login ด้วยรหัสใน .env (เดิม) — ใช้ได้เฉพาะถ้ายังไม่ได้เปลี่ยนรหัสผ่านด้วย set-password
   (หลังเปลี่ยนรหัสผ่านแล้ว รหัสใน .env เป็นรหัสเก่า — ถ้าลบ auth.json จะกลับไปใช้รหัสเก่านั้น)
-- เปลี่ยนรหัสผ่าน: `docker exec -it netguard-manager node scripts/set-password.js` (พิมพ์ในเทอร์มินัล ไม่ echo, ≥ 12 ตัว, ไม่รับ argument/pipe)
+- เปลี่ยนรหัสผ่าน: `docker exec -it netguard-manager node scripts/set-password.js` (พิมพ์ในเทอร์มินัล ไม่ echo, ≥ 12 ตัว, ห้ามตัวอักษรตัวเดียวซ้ำทั้งสาย, ไม่รับ argument/pipe)
   session เก่าทั้งหมดหมดอายุภายใน ~5 วินาที; scripts/gen-password.js (SHA-256) ถูกยกเลิก; ห้ามส่งรหัสผ่าน/hash ผ่านแชต
 - **เปลี่ยนรหัสผ่านจากเว็บ** (ปุ่ม "เปลี่ยนรหัสผ่าน" ในแถบข้าง หรือปุ่ม "เปลี่ยนรหัสผ่านเลย" บน banner รหัสอ่อน → modal 3 ช่อง; `POST /api/auth/password`
   body `{ current, next }`; โค้ด: routes/auth.js `createAuthRouter`, services/password-change.js, middleware/csrf-guard.js, middleware/login-limit.js `createPasswordChangeLimiter`):
@@ -158,7 +158,7 @@ Dashboard จัดการบอทหลายตัวบน server เด�
     ป้องกันจริงของ route อื่นยังเป็น sameSite=strict + รับเฉพาะ JSON เท่านั้น; เรียกจาก curl/สคริปต์ต้องใส่ header เอง
   - ล็อกในโปรเซสกันเปลี่ยนรหัสพร้อมกัน (ชื่อไฟล์ชั่วคราว `auth.json.tmp` ตายตัว): คำขอที่สองรอคิวแล้วถูกตรวจรหัสเดิมกับสถานะหลังคำขอแรก (ได้ 403)
   - **ทางกู้เมื่อลืมรหัส/เข้าเว็บไม่ได้** (ต้องมีสิทธิ์บนเครื่องที่รัน Manager):
-    1. CLI: `docker exec -it netguard-manager node scripts/set-password.js` (ใช้กฎรหัสใหม่ชุดเดียวกัน; session เก่าหมดอายุภายใน ~5 วินาที)
+    1. CLI: `docker exec -it netguard-manager node scripts/set-password.js` (ใช้กฎรหัสใหม่ชุดเดียวกัน: ≥ 12 ตัว และห้ามตัวอักษรตัวเดียวซ้ำทั้งสาย; session เก่าหมดอายุภายใน ~5 วินาที)
     2. ลบ `auth.json`: `docker exec netguard-manager rm /app/data/auth.json` → กลับไปใช้ hash ใน .env
        ⚠️ **กับดัก**: หลังเปลี่ยนรหัสผ่านแล้ว hash ใน .env เป็น **รหัสเก่า** (เขียน .env กลับจาก container ไม่ได้) การลบ auth.json จึงเท่ากับย้อนไปใช้รหัสเก่า — banner "hash ใน .env ล้าสมัย" ในหน้าเว็บเตือนเรื่องนี้;
        ถ้ารหัสเก่ารั่วไปแล้ว ให้เปลี่ยน hash ใน .env ด้วยมือ (ไม่ใส่รหัสในแชต) หรือใช้ CLI แทนการลบ auth.json
