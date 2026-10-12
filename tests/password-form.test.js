@@ -108,7 +108,14 @@ test('modals.js: submit เปลี่ยนรหัสไม่ส่งร�
   assert.ok(m, 'ต้องมี submitChangePassword');
   assert.doesNotMatch(m[0], /console\.(log|info|warn|error)/);
   assert.match(m[0], /validatePasswordForm/);
-  assert.match(m[0], /\.value\s*=\s*''/);
+  assert.match(m[0], /clearPasswordFields\(\)/); // ล้างช่องหลังสำเร็จ
+  const clear = src.match(/function clearPasswordFields[\s\S]*?\n}\n/);
+  assert.ok(clear, 'ต้องมี clearPasswordFields');
+  assert.match(clear[0], /\.value\s*=\s*''/);
+  const close = src.match(/function closeChangePasswordModal[\s\S]*?\n}\n/);
+  assert.ok(close && /clearPasswordFields\(\)/.test(close[0]), 'ปิด modal ต้องล้างช่อง');
+  const open = src.match(/function openChangePasswordModal[\s\S]*?\n}\n/);
+  assert.ok(open && /clearPasswordFields\(\)/.test(open[0]), 'เปิด modal ต้องล้างช่อง');
 });
 
 test('app/modals ผูกปุ่ม changePasswordBtn และ weakPasswordChangeBtn', () => {
@@ -125,4 +132,12 @@ test('audit-ui: แสดง banner .env ล้าสมัยจาก envHashS
 
 test('audit filter มีตัวเลือก auth.* อยู่แล้วและครอบคลุม auth.password-change', () => {
   assert.match(read('index.html'), /<option value="auth\.">/);
+});
+
+test('validatePasswordForm: ยาว 12 พอดีผ่าน, 11 ไม่ผ่าน; emoji ซ้ำทั้งสายไม่ผ่าน', () => {
+  const { validatePasswordForm } = loadForm();
+  const ok = 'abcdefghijkl';
+  assert.equal(validatePasswordForm({ current: rnd('c'), next: ok, confirm: ok }), null);
+  assert.ok(validatePasswordForm({ current: rnd('c'), next: ok.slice(0, 11), confirm: ok.slice(0, 11) }));
+  assert.ok(validatePasswordForm({ current: rnd('c'), next: '😀'.repeat(13), confirm: '😀'.repeat(13) }));
 });

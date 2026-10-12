@@ -73,3 +73,19 @@ test('ไม่มี Host เลยแต่มี Origin → 403 (เทีย
 test('ค่า X-Requested-With ว่าง → 403', () => {
   assert.equal(run({ Host: 'localhost:8080', 'X-Requested-With': '' }).status, 403);
 });
+
+test('Origin ที่ไม่ใช่ http/https (เช่น ftp://) → 403 แม้ host จะตรง', () => {
+  assert.equal(run({ Host: 'manager.example.org', Origin: 'ftp://manager.example.org', ...XRW }).status, 403);
+  assert.equal(run({ Host: 'manager.example.org', Origin: 'chrome-extension://manager.example.org', ...XRW }).status, 403);
+});
+
+test('เรียก onReject พร้อมเหตุผล และ onReject ที่ throw ไม่ทำให้ตอบ 403 ไม่ได้', () => {
+  const reasons = [];
+  const mw = requireSameOrigin({ onReject: (req, reason) => { reasons.push(reason); throw new Error('boom'); } });
+  const mk = (headers) => ({ req: { headers }, res: { code: null, status(c) { this.code = c; return this; }, json() { return this; } } });
+  const a = mk({ host: 'h' }); mw(a.req, a.res, () => {});
+  const b = mk({ host: 'h', origin: 'http://x', 'x-requested-with': 'fetch' }); mw(b.req, b.res, () => {});
+  assert.deepEqual(reasons, ['missing-header', 'origin-mismatch']);
+  assert.equal(a.res.code, 403);
+  assert.equal(b.res.code, 403);
+});

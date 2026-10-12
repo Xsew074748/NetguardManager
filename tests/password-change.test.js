@@ -371,3 +371,50 @@ test('log ไม่มีรหัสผ่านใด ๆ (เก่า/ให
   const all = lines.join('\n');
   for (const secret of [wrong, a.current, good]) assert.equal(all.includes(secret), false);
 });
+
+// ── เสริมหลัง mutation check ───────────────────────────────────────────────────
+test('validateNewPassword: ตัวอักษรนอก BMP (emoji) ซ้ำทั้งสายก็ถูกปฏิเสธ (นับเป็นอักขระ ไม่ใช่ UTF-16 unit)', () => {
+  assert.notEqual(password.validateNewPassword('😀'.repeat(13)), null);
+  assert.equal(password.validateNewPassword('😀'.repeat(12) + '😁'), null);
+});
+
+test('validateNewPassword: ยาว 12 พอดีผ่าน, 11 ไม่ผ่าน', () => {
+  assert.equal(password.validateNewPassword('abcdefghijkl'), null);
+  assert.notEqual(password.validateNewPassword('abcdefghijk'), null);
+});
+
+test('hashOpts ที่ฉีดเข้า factory ถูกใช้จริง (hash ที่เก็บมี N=2^10 ตามค่าเบาของเทสต์ ไม่ใช่ค่า production)', async (t) => {
+  const a = await startApp(t);
+  const cookie = await a.login();
+  assert.equal((await a.change(cookie, { current: a.current, next: rnd('new') })).status, 200);
+  assert.match(readAuthFile().hash, /^scrypt\$1024\$8\$1\$/);
+});
+
+test('สำเร็จติดกันเกินโควตา (6 ครั้ง) ได้หมด — สำเร็จไม่กินโควตา limiter', async (t) => {
+  const a = await startApp(t);
+  let cookie = await a.login();
+  let cur = a.current;
+  for (let i = 0; i < 6; i++) {
+    const next = rnd(`n${i}`);
+    const res = await a.change(cookie, { current: cur, next });
+    assert.equal(res.status, 200, `ครั้งที่ ${i + 1}`);
+    cookie = res.headers.get('set-cookie').split(';')[0];
+    cur = next;
+  }
+});
+
+test('limiter ไม่ผูก IP แม้ req.ip ต่างกันจริง (trust proxy): X-Forwarded-For ต่างกัน นับรวมก้อนเดียว', async (t) => {
+  const { createPasswordChangeLimiter } = require('../middleware/login-limit');
+  const app = express();
+  app.set('trust proxy', true);
+  const seenIps = new Set();
+  app.post('/p', (req, res, next) => { seenIps.add(req.ip); next(); }, createPasswordChangeLimiter({ max: 3, windowMs: 60000 }), (req, res) => res.status(403).json({ error: 'x' }));
+  const server = http.createServer(app);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => server.close());
+  const post = (ip) => fetch(`http://127.0.0.1:${server.address().port}/p`, { method: 'POST', headers: { 'X-Forwarded-For': ip } });
+  const codes = [];
+  for (const ip of ['203.0.113.1', '203.0.113.2', '203.0.113.3', '203.0.113.4']) codes.push((await post(ip)).status);
+  assert.equal(seenIps.size, 4, 'ต้อง simulate IP ต่างกันได้จริง');
+  assert.deepEqual(codes, [403, 403, 403, 429]);
+});
