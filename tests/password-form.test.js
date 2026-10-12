@@ -141,3 +141,21 @@ test('validatePasswordForm: ยาว 12 พอดีผ่าน, 11 ไม่�
   assert.ok(validatePasswordForm({ current: rnd('c'), next: ok.slice(0, 11), confirm: ok.slice(0, 11) }));
   assert.ok(validatePasswordForm({ current: rnd('c'), next: '😀'.repeat(13), confirm: '😀'.repeat(13) }));
 });
+
+test('index.html: ปุ่มส่งใน modal เป็น submit ของ changePasswordForm และฟอร์ม novalidate (Enter ในช่องรหัสต้องส่งเหมือนกดปุ่ม)', () => {
+  const html = read('index.html');
+  assert.match(html, /<form[^>]*id="changePasswordForm"[^>]*novalidate|<form[^>]*novalidate[^>]*id="changePasswordForm"/);
+  const btn = html.match(/<button[^>]*id="changePasswordSubmitBtn"[^>]*>/);
+  assert.ok(btn, 'ต้องมีปุ่มส่ง');
+  assert.match(btn[0], /type="submit"/);
+  assert.match(btn[0], /form="changePasswordForm"/);
+});
+
+test('modals.js: submit ผูกทางเดียวที่ฟอร์ม (ไม่ผูกคลิกปุ่มซ้ำ) และกันส่งซ้ำขณะรอ', () => {
+  const src = read('js/modals.js');
+  assert.doesNotMatch(src, /getElementById\('changePasswordSubmitBtn'\)\.addEventListener\('click'/);
+  assert.match(src, /getElementById\('changePasswordForm'\)\.addEventListener\('submit'/);
+  const m = src.match(/async function submitChangePassword[\s\S]*?\n}\n/);
+  assert.ok(m, 'ต้องมี submitChangePassword');
+  assert.match(m[0], /if \(btn\.disabled\) return;/);
+});

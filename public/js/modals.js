@@ -964,6 +964,8 @@ function closeChangePasswordModal() {
 }
 
 async function submitChangePassword() {
+  const btn = document.getElementById('changePasswordSubmitBtn');
+  if (btn.disabled) return;
   changePasswordError.classList.remove('show');
   const [cur, nxt, cfm] = pwFields;
   const problem = validatePasswordForm({ current: cur.value, next: nxt.value, confirm: cfm.value });
@@ -972,7 +974,6 @@ async function submitChangePassword() {
     changePasswordError.classList.add('show');
     return;
   }
-  const btn = document.getElementById('changePasswordSubmitBtn');
   btn.disabled = true;
   try {
     const result = await apiChangePassword(cur.value, nxt.value);
@@ -994,7 +995,6 @@ document.getElementById('changePasswordBtn').addEventListener('click', openChang
 document.getElementById('weakPasswordChangeBtn').addEventListener('click', openChangePasswordModal);
 document.getElementById('changePasswordModalClose').addEventListener('click', closeChangePasswordModal);
 document.getElementById('changePasswordCancelBtn').addEventListener('click', closeChangePasswordModal);
-document.getElementById('changePasswordSubmitBtn').addEventListener('click', submitChangePassword);
 document.getElementById('changePasswordForm').addEventListener('submit', (e) => { e.preventDefault(); submitChangePassword(); });
 changePasswordModal.addEventListener('click', (e) => { if (e.target === changePasswordModal) closeChangePasswordModal(); });
 

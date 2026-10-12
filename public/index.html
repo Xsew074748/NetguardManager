@@ -288,7 +288,7 @@
     </div>
     <div class="modal-body">
       <div class="form-error" id="changePasswordError"></div>
-      <form id="changePasswordForm">
+      <form id="changePasswordForm" novalidate>
         <div class="field">
           <label for="pwCurrent">รหัสผ่านเดิม</label>
           <input type="password" id="pwCurrent" name="current-password" autocomplete="current-password" required>
@@ -307,7 +307,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" id="changePasswordCancelBtn">ยกเลิก</button>
-      <button class="btn btn-teal" id="changePasswordSubmitBtn">เปลี่ยนรหัสผ่าน</button>
+      <button type="submit" form="changePasswordForm" class="btn btn-teal" id="changePasswordSubmitBtn">เปลี่ยนรหัสผ่าน</button>
     </div>
   </div>
 </div>
