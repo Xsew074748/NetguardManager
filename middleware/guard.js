@@ -66,6 +66,13 @@ function isPasswordWeak() {
   return !!(stored && stored.weak);
 }
 
+// hash ของรหัสผ่านใน .env (MANAGER_PASSWORD_HASH) ล้าสมัยแล้วไหม — จริงเมื่อ auth.json ถูกตั้งด้วยการ "เปลี่ยนรหัส" (เว็บ/CLI)
+// และ .env ยังมี hash อยู่ (ถ้าลบ auth.json จะกลับไปใช้รหัสเก่า); migrate โดยรหัสเดิมไม่ถือว่าล้าสมัย (.env ยังตรงกับรหัสปัจจุบัน)
+function isEnvHashStale() {
+  const stored = authStore.load();
+  return !!(stored && !stored.migratedFromLegacy && (config.managerPasswordHash || '').trim());
+}
+
 // ── Session ─────────────────────────────────────────────────────────────────────
 function createSession() {
   const token = crypto.randomBytes(32).toString('hex');
@@ -155,6 +162,7 @@ module.exports = {
   requireAuth,
   authenticate,
   isPasswordWeak,
+  isEnvHashStale,
   createSession,
   destroySession,
   destroyAllSessions,

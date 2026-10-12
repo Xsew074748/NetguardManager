@@ -68,11 +68,18 @@ function verifyLegacy(password, storedHex) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// ตัวอักษรตัวเดียวซ้ำทั้งสาย (เช่น "aaaaaaaaaaaa") — นับเป็นอักขระ unicode ไม่ใช่ UTF-16 unit
+function isSingleRepeatedChar(str) {
+  const chars = Array.from(str);
+  return chars.length > 1 && chars.every((c) => c === chars[0]);
+}
+
 // คืน null ถ้าผ่าน หรือข้อความอธิบายเหตุผลที่ไม่ผ่าน
 function validateNewPassword(password) {
   if (typeof password !== 'string') return 'รหัสผ่านต้องเป็นข้อความ';
   if (password.length < MIN_PASSWORD_LENGTH) return `รหัสผ่านต้องยาวอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`;
   if (password.length > MAX_PASSWORD_LENGTH) return `รหัสผ่านยาวเกิน ${MAX_PASSWORD_LENGTH} ตัวอักษร`;
+  if (isSingleRepeatedChar(password)) return 'รหัสผ่านต้องไม่ใช่ตัวอักษรตัวเดียวซ้ำกันทั้งสาย';
   return null;
 }
 

@@ -26,4 +26,26 @@ function createLoginLimiters({ windowMs = DEFAULTS.windowMs, perIpMax = DEFAULTS
   return [globalLimiter, ipLimiter];
 }
 
-module.exports = { createLoginLimiters, DEFAULTS };
+// limiter ของ "เปลี่ยนรหัสผ่าน" — แยกอินสแตนซ์จาก login (รหัสเดิมผิดซ้ำไม่ไปล็อก login) และ **ไม่ผูก IP**
+// (ทุกคำขอมาจาก IP เดียวหลัง Docker NAT/tunnel) นับรวมทั้งระบบ; นับเฉพาะ response 403 (= รหัสเดิมผิด) —
+// 400 (รหัสใหม่ไม่ผ่านกฎ) และสำเร็จไม่กินโควตา; ตรวจก่อน handler จึงถูกตัดก่อนเรียก scrypt
+const PASSWORD_CHANGE_DEFAULTS = { windowMs: 15 * 60 * 1000, max: 5 };
+
+function createPasswordChangeLimiter({ windowMs = PASSWORD_CHANGE_DEFAULTS.windowMs, max = PASSWORD_CHANGE_DEFAULTS.max, onBlocked = () => {} } = {}) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    keyGenerator: () => 'password-change',
+    validate: false,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (req, res) => res.statusCode !== 403,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      try { onBlocked(req); } catch { /* ห้ามทำให้ตอบ 429 ไม่ได้ */ }
+      res.status(429).json({ error: 'Too many failed attempts. Try again later.' });
+    },
+  });
+}
+
+module.exports = { createLoginLimiters, createPasswordChangeLimiter, DEFAULTS, PASSWORD_CHANGE_DEFAULTS };

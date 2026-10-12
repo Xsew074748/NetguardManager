@@ -80,7 +80,7 @@ test('legacy sha256: ตรวจได้/ผิดรูปไม่ผ่า�
   assert.equal(password.verifyLegacy('wrong', sha(PW)), false);
   assert.equal(password.verifyLegacy(PW, 'not-a-hash'), false);
   assert.equal(password.validateNewPassword('a'.repeat(11)) !== null, true);
-  assert.equal(password.validateNewPassword('a'.repeat(12)), null);
+  assert.equal(password.validateNewPassword('a'.repeat(11) + 'b'), null); // 12 ตัวพอดี (ไม่ใช่ตัวเดียวซ้ำทั้งสาย — กฎนั้นอยู่ใน password-change.test.js)
   assert.equal(password.validateNewPassword(undefined) !== null, true);
 });
 
