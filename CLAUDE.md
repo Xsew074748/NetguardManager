@@ -97,8 +97,8 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   route POST /api/bots/:id/test-connection — ห้าม log body (มี secret) log แค่ botId + system
 - secret ที่มีค่าเดิมซ่อนอยู่และยังไม่กรอกใหม่ → frontend ไม่รู้ค่าจริง จึงเตือนสีเหลืองแทนการยิง test
 - bot ที่ยังใช้ image เก่า (ไม่มี /test-connection) จะตอบ "ติดต่อ bot ไม่ได้" — ต้อง recreate bot ก่อน
-- autofill fix (commit แล้ว; รอผลทดสอบ Chrome จริงจากผู้ใช้): แก้ autofill (name="bot-table-filter" + data-lpignore ที่ช่องค้นหา, autocomplete="new-password" ที่ password ใน login.html
-  และใน config modal) แก้ + rebuild manager แล้ว
+- autofill fix (commit แล้ว; รอผลทดสอบ Chrome จริงจากผู้ใช้): แก้ autofill (name="bot-table-filter" + data-lpignore ที่ช่องค้นหา, autocomplete="new-password" ที่ password ใน config modal;
+  ช่องรหัสใน login.html เปลี่ยนเป็น `current-password` แล้ว (ให้ตัวจัดการรหัสผ่านเติมได้ — ยังรอผลทดสอบ Chrome จริง); ช่องใน modal เปลี่ยนรหัสใช้ current-password/new-password ตามความหมาย) แก้ + rebuild manager แล้ว
 - /js/*.js เปิดอ่านได้โดยไม่ต้อง login (express.static) เป็นพฤติกรรมเดิม ยังไม่ได้ตัดสินใจว่าจะปิดหรือไม่
 - ค่า OMADA_URL ใน bots/test/.env ยังเพี้ยน (ซ้อนคีย์) ยังไม่ได้แก้
 - บันทึก meta ผ่าน edit-meta ทุกครั้งอัปเดต updatedAt และเพิ่มฟิลด์ว่าง (พฤติกรรมเดิมของ writeMeta ไม่ใช่บั๊ก)
@@ -145,6 +145,25 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   (หลังเปลี่ยนรหัสผ่านแล้ว รหัสใน .env เป็นรหัสเก่า — ถ้าลบ auth.json จะกลับไปใช้รหัสเก่านั้น)
 - เปลี่ยนรหัสผ่าน: `docker exec -it netguard-manager node scripts/set-password.js` (พิมพ์ในเทอร์มินัล ไม่ echo, ≥ 12 ตัว, ไม่รับ argument/pipe)
   session เก่าทั้งหมดหมดอายุภายใน ~5 วินาที; scripts/gen-password.js (SHA-256) ถูกยกเลิก; ห้ามส่งรหัสผ่าน/hash ผ่านแชต
+- **เปลี่ยนรหัสผ่านจากเว็บ** (ปุ่ม "เปลี่ยนรหัสผ่าน" ในแถบข้าง หรือปุ่ม "เปลี่ยนรหัสผ่านเลย" บน banner รหัสอ่อน → modal 3 ช่อง; `POST /api/auth/password`
+  body `{ current, next }`; โค้ด: routes/auth.js `createAuthRouter`, services/password-change.js, middleware/csrf-guard.js, middleware/login-limit.js `createPasswordChangeLimiter`):
+  1. ต้อง login อยู่ → ใส่รหัสเดิม + รหัสใหม่สองช่อง; กฎรหัสใหม่ (ทั้ง browser และ server): ยาว 12–1,024 ตัวอักษร, ไม่ใช่ตัวอักษรตัวเดียวซ้ำทั้งสาย, ไม่ซ้ำรหัสเดิม
+  2. สำเร็จ: เขียน scrypt hash ลง `auth.json` (atomic, 0600, ธง weak หาย), session อื่นทั้งหมดถูกยกเลิก ผู้เปลี่ยนได้ session ใหม่และอยู่ต่อ, audit `auth.password-change`
+  3. รหัสเดิมผิดตอบ **403** (ห้ามเปลี่ยนเป็น 401: public/js/api.js เด้งไป login.html ทุกครั้งที่ได้ 401); รูปแบบรหัสใหม่ไม่ผ่านตอบ 400; เขียนไฟล์ไม่ได้ตอบ 500 (รหัสเดิมยังใช้ได้)
+  4. `/api/auth/status` มี `envHashStale: true` (เฉพาะผู้ที่ login แล้ว และเฉพาะตอนเป็นจริง) เมื่อ `MANAGER_PASSWORD_HASH` ใน .env ล้าสมัยแล้ว (auth.json ถูกตั้งด้วยการเปลี่ยนรหัส และ .env ยังมี hash) → UI แสดง banner;
+     การย้าย hash โดยรหัสเดิม (migrate) ไม่นับว่าล้าสมัย
+  - **ข้อจำกัดของ limiter**: นับรวมทั้งระบบ **ไม่ผูก IP** (ทุกคำขอมาจาก IP เดียวหลัง Docker NAT/tunnel) 5 ครั้งที่ "รหัสเดิมผิด" (403) ต่อ 15 นาที → 429 ตรวจก่อนเรียก scrypt;
+    400 และสำเร็จไม่กินโควตา; แยกจาก limiter ของ login (รหัสเดิมผิดซ้ำไม่ล็อก login); อยู่ในหน่วยความจำ (restart = รีเซ็ต); ใครเข้าถึง session ที่ login อยู่ได้ก็ล็อกการเปลี่ยนรหัสของทุกคน 15 นาทีได้ด้วยการส่งรหัสเดิมผิด (trade-off เดียวกับ login)
+  - **ข้อจำกัดของ CSRF guard** (ใช้เฉพาะ route นี้ — ยังไม่ครอบ route อื่นที่เปลี่ยนสถานะ): ต้องมี header `X-Requested-With` และถ้ามี `Origin` ต้องชี้ host เดียวกับ `Host` หรือ `X-Forwarded-Host` (ตัวแรก);
+    ป้องกันจริงของ route อื่นยังเป็น sameSite=strict + รับเฉพาะ JSON เท่านั้น; เรียกจาก curl/สคริปต์ต้องใส่ header เอง
+  - ล็อกในโปรเซสกันเปลี่ยนรหัสพร้อมกัน (ชื่อไฟล์ชั่วคราว `auth.json.tmp` ตายตัว): คำขอที่สองรอคิวแล้วถูกตรวจรหัสเดิมกับสถานะหลังคำขอแรก (ได้ 403)
+  - **ทางกู้เมื่อลืมรหัส/เข้าเว็บไม่ได้** (ต้องมีสิทธิ์บนเครื่องที่รัน Manager):
+    1. CLI: `docker exec -it netguard-manager node scripts/set-password.js` (ใช้กฎรหัสใหม่ชุดเดียวกัน; session เก่าหมดอายุภายใน ~5 วินาที)
+    2. ลบ `auth.json`: `docker exec netguard-manager rm /app/data/auth.json` → กลับไปใช้ hash ใน .env
+       ⚠️ **กับดัก**: หลังเปลี่ยนรหัสผ่านแล้ว hash ใน .env เป็น **รหัสเก่า** (เขียน .env กลับจาก container ไม่ได้) การลบ auth.json จึงเท่ากับย้อนไปใช้รหัสเก่า — banner "hash ใน .env ล้าสมัย" ในหน้าเว็บเตือนเรื่องนี้;
+       ถ้ารหัสเก่ารั่วไปแล้ว ให้เปลี่ยน hash ใน .env ด้วยมือ (ไม่ใส่รหัสในแชต) หรือใช้ CLI แทนการลบ auth.json
+  - Rollback image: รูปแบบ `auth.json` เป็น `version: 1` เหมือนเดิม ไม่มีฟิลด์ใหม่ — image ที่มีโค้ดตั้งแต่ commit d8c6f1a (2026-10-02) ขึ้นไปอ่านได้ (image production ปัจจุบันสร้างจาก master และมีโค้ดนี้ — ตรวจเทียบไฟล์ใน image แล้ว);
+    image ก่อน d8c6f1a อ่าน auth.json ไม่ได้ → รหัสใหม่ใช้ไม่ได้ ใช้ได้เฉพาะรหัสเก่าใน .env
 - รหัสเดิมที่สั้นกว่า 12 ตัว: migrate ให้แต่ติดธง weak ใน auth.json → UI แสดง banner เตือน + audit `auth.weak-password` (เตือนอย่างเดียว ไม่บังคับ)
 - **Rate limit login** (middleware/login-limit.js, express-rate-limit ตัวเดิม): นับเฉพาะ login ที่ผิด; 5 ครั้ง/15 นาที/IP **และ** เพดานรวม 20 ครั้ง/15 นาทีทั้งระบบ
   ⚠️ บน Docker Desktop ทุก client ถูก NAT เป็น IP เดียว (`::ffff:172.18.0.1`) → "ต่อ IP" แยกคนไม่ได้ และ networkGuard ชั้นแรกผ่านเสมอ;
@@ -155,7 +174,7 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - **Audit log**: ตาราง `audit_log` ใน stats.db (เก็บ 365 วัน, prune ใน checkDailyRollup) — services/audit.js
   บันทึกอัตโนมัติทุก request ที่ไม่ใช่ GET ใน /api (bot.create/start/stop/restart/remove, image.pull, tunnel.attach/detach, bot.meta.update,
   bot.config.update, bot.daily-summary.update, bot.test-connection; route ใหม่ที่ยังไม่ map จะลงเป็น "METHOD /path") + auth.login (ok/fail), auth.login-locked,
-  auth.logout, auth.password-migrated, auth.weak-password
+  auth.logout, auth.password-migrated, auth.weak-password, auth.password-change (ok/fail/denied + เหตุผลสั้น เช่น bad-current, invalid-new, same-as-current, write-failed, csrf — ไม่มีค่ารหัส), auth.password-change-locked
   **ไม่เก็บ secret**: ไม่รับ req.body; config เก็บเฉพาะชื่อ key ที่เปลี่ยน, test-connection เก็บแค่ชื่อระบบ, tunnel เก็บแค่ว่ามีหรือไม่; sanitize ซ้ำชั้นที่สอง
   (ตัด key ชื่อลับ, ค่าที่หน้าตาเป็น token → [redacted], object ซ้อน, จำกัดขนาด) — เขียน audit พังไม่ทำให้ action ล้ม
   actor = `sess-xxxxxxxx` (hash ตัดสั้นของ session; ใช้รหัสผ่านร่วมกันจึงระบุตัวบุคคลไม่ได้) และ IP จะเป็น gateway เดียวกันบน Docker Desktop
