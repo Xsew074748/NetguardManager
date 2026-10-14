@@ -3,3 +3,10 @@ node_modules
 .env
 
 CLAUDE.local.md
+
+# กันข้อมูลรันไทม์/ไฟล์สำรองหลุดเข้า image ผ่าน COPY . .
+auth.json
+*.db
+*.db-wal
+*.db-shm
+*.bak*
