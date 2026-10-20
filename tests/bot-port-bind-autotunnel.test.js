@@ -160,3 +160,10 @@ test('ค่าที่ตั้งไม่รั่วเข้า Env/Labels
     assert.ok(!JSON.stringify(rest).includes('127.0.0.1'), c.name);
   }
 });
+
+test('ทาง autoTunnel ส่งต่อ companyName ให้การสร้างบอท (meta.json ถูกเขียนเหมือนทางธรรมดา)', async () => {
+  installFakeCloudflare();
+  await dockerService.createBot({ name: 'withmeta', port: await freePort(), companyName: 'ACME', autoTunnel: true, hostname: 'withmeta.example.com' });
+  const meta = JSON.parse(fs.readFileSync(path.join(process.env.BOTS_ROOT, 'withmeta', 'meta.json'), 'utf8'));
+  assert.equal(meta.companyName, 'ACME');
+});
