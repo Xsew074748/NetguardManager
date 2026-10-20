@@ -14,6 +14,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
 const HOSTNAME_RE = new RegExp(`^${LABEL}(?:\\.${LABEL})+$`);
 const SERVICE_RE = /^https?:\/\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?(?::\d{1,5})?$/;
+const OWNED_TUNNEL_NAME_RE = /^netguard-[a-z0-9][a-z0-9-]{1,30}$/; // netguard-<ชื่อบอท> ตาม BOT_NAME_RE ของ Manager
 const TUNNEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const TOKEN_RE = /^[\x21-\x7e]{8,}$/; // อักขระที่พิมพ์ได้ ไม่มีช่องว่าง/ขึ้นบรรทัดใหม่ (กัน header injection)
 const TOKENISH_RE = /[A-Za-z0-9_\-+/=.]{24,}/g;
@@ -123,6 +124,9 @@ function createCloudflareClient(options = {}) {
       let err;
       let status = null;
       let headers = null;
+      // ตัวจับเวลาของเราเอง (ไม่ใช้ AbortSignal.timeout: ตัวนั้น unref จึงไม่ปลุก event loop — ในสคริปต์/เทสต์ที่ไม่มีอย่างอื่นค้างอยู่ คำขอที่ค้างจะไม่ถูกตัด)
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), timeoutMs);
       try {
         const res = await (injectedFetch || globalThis.fetch)(url, {
           method,
@@ -132,7 +136,7 @@ function createCloudflareClient(options = {}) {
             ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: controller.signal,
         });
         status = res.status;
         headers = res.headers;
@@ -153,6 +157,8 @@ function createCloudflareClient(options = {}) {
           const sys = e && typeof e.code === 'string' && /^[A-Z0-9_]{3,40}$/.test(e.code) ? ` (${e.code})` : '';
           err = fail(op, 'network', `network error${sys}`, { retryable: true, attempts: attempt + 1 });
         }
+      } finally {
+        clearTimeout(timer);
       }
       if (!(idempotent && err.retryable && attempt < maxRetries)) throw err;
       await sleep(retryDelay(attempt, status, headers));
@@ -237,42 +243,84 @@ function createCloudflareClient(options = {}) {
     return { id: env.result.id };
   }
 
-  async function deleteDnsRecord(recordId) {
+  // ลบ DNS record เฉพาะที่เป็นของเรา: ต้องเห็น record id นี้ในผล list ตามชื่อ เป็น CNAME ที่ชี้ <tunnelId>.cfargotunnel.com เท่านั้น
+  // ไม่พบใน list = ลบไปแล้ว (list สำเร็จจึงเชื่อได้; ถ้า list ล้มจะ throw ไม่ถือว่าลบแล้ว) · DELETE ได้ 404 → list ซ้ำก่อนสรุป (404 อาจมาจาก zone/account ID ผิด)
+  async function deleteDnsRecord(recordId, { hostname, tunnelId } = {}) {
     const op = 'deleteDnsRecord';
     need(isValidId(recordId), op, 'invalid-id', 'record id');
+    need(isValidTunnelId(tunnelId), op, 'invalid-id', 'tunnel id');
+
+    const record = (await findDnsRecords(hostname)).find((r) => r.id === recordId);
+    if (!record) return { deleted: false, alreadyGone: true };
+    const ours = `${tunnelId.toLowerCase()}.cfargotunnel.com`;
+    if (record.type !== 'CNAME' || typeof record.content !== 'string' || record.content.toLowerCase() !== ours) {
+      throw fail(op, 'not-owned', 'record is not a CNAME to this tunnel — refusing to delete');
+    }
     try {
       await request(op, 'DELETE', `${zone}/${recordId}`);
       return { deleted: true, alreadyGone: false };
     } catch (e) {
-      if (e instanceof CloudflareError && e.status === 404) return { deleted: false, alreadyGone: true };
-      throw e;
+      if (!(e instanceof CloudflareError) || e.status !== 404) throw e;
     }
+    const stillThere = (await findDnsRecords(hostname)).some((r) => r.id === recordId);
+    if (stillThere) throw fail(op, 'delete-unconfirmed', 'DELETE returned 404 but the record is still listed (wrong account/zone?)');
+    return { deleted: false, alreadyGone: true };
+  }
+
+  async function findTunnelById(tunnelId) {
+    const op = 'findTunnelById';
+    need(isValidTunnelId(tunnelId), op, 'invalid-id', 'tunnel id');
+    const env = await request(op, 'GET', acct, { query: { uuid: tunnelId, is_deleted: 'false', per_page: '100' } });
+    const found = listResult(op, env).find((t) => t && typeof t.id === 'string' && t.id.toLowerCase() === tunnelId.toLowerCase() && !t.deleted_at);
+    return found ? { id: found.id, name: found.name } : null;
   }
 
   async function cleanupConnections(tunnelId) {
     await request('cleanupConnections', 'DELETE', `${acct}/${tunnelId}/connections`);
   }
 
-  async function deleteTunnelOnce(tunnelId) {
+  async function confirmTunnelGone(op, tunnelId) {
+    if (await findTunnelById(tunnelId)) throw fail(op, 'delete-unconfirmed', 'got 404 but the tunnel is still listed (wrong account?)');
+    return { deleted: false, alreadyGone: true };
+  }
+
+  // { result } เมื่อจบเรื่อง (ลบแล้ว/ยืนยันแล้วว่าไม่อยู่) หรือ { error } เมื่อควรลอง cleanup connections แล้วลบซ้ำ
+  async function tryDeleteTunnel(tunnelId) {
     try {
       await request('deleteTunnel', 'DELETE', `${acct}/${tunnelId}`);
-      return { deleted: true, alreadyGone: false };
+      return { result: { deleted: true, alreadyGone: false } };
     } catch (e) {
-      if (e instanceof CloudflareError && e.status === 404) return { deleted: false, alreadyGone: true };
-      throw e;
+      if (!(e instanceof CloudflareError) || e.code === 'no-token') throw e;
+      if (e.status === 404) return { result: await confirmTunnelGone('deleteTunnel', tunnelId) };
+      return { error: e };
     }
   }
 
-  // เอกสารบอกแค่ว่า tunnel ต้องไม่มี connection ตอนลบ (ไม่ระบุรหัส error) → ล้มด้วยเหตุใดก็ตาม ให้ cleanup connections แล้วลองอีกครั้งเดียว
-  async function deleteTunnel(tunnelId) {
-    need(isValidTunnelId(tunnelId), 'deleteTunnel', 'invalid-id', 'tunnel id');
+  // ป้องกันลบ tunnel ผิดตัว (เช่น state ถูกแก้ให้ชี้ tunnel production): GET ตาม id ก่อน และต้องชื่อตรงกับ expectedName (netguard-<บอท>) เป๊ะ
+  // เอกสารบอกแค่ว่า tunnel ต้องไม่มี connection ตอนลบ (ไม่ระบุรหัส error) → ลบล้มเหลวเหตุใดก็ตาม ให้ cleanup connections แล้วลองอีกครั้งเดียว
+  async function deleteTunnel(tunnelId, { expectedName } = {}) {
+    const op = 'deleteTunnel';
+    need(isValidTunnelId(tunnelId), op, 'invalid-id', 'tunnel id');
+    need(typeof expectedName === 'string' && OWNED_TUNNEL_NAME_RE.test(expectedName), op, 'invalid-argument', 'expected tunnel name (must be netguard-<bot>)');
+
+    let tunnel;
     try {
-      return await deleteTunnelOnce(tunnelId);
+      tunnel = (await request(op, 'GET', `${acct}/${tunnelId}`)).result;
     } catch (e) {
-      if (!(e instanceof CloudflareError) || e.code === 'no-token') throw e;
+      if (e instanceof CloudflareError && e.status === 404) return confirmTunnelGone(op, tunnelId);
+      throw e;
     }
+    if (!tunnel || typeof tunnel.id !== 'string' || typeof tunnel.name !== 'string') throw fail(op, 'invalid-response', 'tunnel response has no id/name');
+    if (tunnel.id.toLowerCase() !== tunnelId.toLowerCase()) throw fail(op, 'not-owned', 'tunnel response id does not match the requested id');
+    if (tunnel.name !== expectedName) throw fail(op, 'not-owned', `tunnel name does not match "${expectedName}" — refusing to delete`);
+    if (tunnel.deleted_at) return { deleted: false, alreadyGone: true };
+
+    const first = await tryDeleteTunnel(tunnelId);
+    if (first.result) return first.result;
     await cleanupConnections(tunnelId);
-    return deleteTunnelOnce(tunnelId);
+    const second = await tryDeleteTunnel(tunnelId);
+    if (second.result) return second.result;
+    throw second.error;
   }
 
   return {
@@ -282,6 +330,7 @@ function createCloudflareClient(options = {}) {
     getTunnelToken,
     putIngress,
     createCname,
+    findTunnelById,
     deleteDnsRecord,
     deleteTunnel,
   };

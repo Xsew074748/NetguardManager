@@ -9,6 +9,7 @@ const { createCloudflareClient, CloudflareError } = require('../services/cloudfl
 const ACCT = '0123456789abcdef0123456789abcdef';
 const ZONE = 'fedcba9876543210fedcba9876543210';
 const TID = '11111111-2222-4333-8444-555555555555';
+const TID2 = '22222222-2222-4333-8444-555555555555';
 const REC = 'abcdef0123456789abcdef0123456789';
 const SECRET = 'cfapitoken_SECRET_0123456789abcdefghij';
 const TUNNEL_TOKEN = 'eyJhIjoiQUNDVCIsInQiOiJUVU5ORUwifQ_tunneltoken_SECRET_1234567890';
@@ -229,61 +230,207 @@ test('list ที่ Cloudflare บอกว่ามีมากกว่าท
   assert.deepEqual(await fine.client.findDnsRecords('shop.example.com'), []);
 });
 
-test('deleteDnsRecord: DELETE /zones/{zone}/dns_records/{id}; 404 = ลบไปแล้ว (alreadyGone) ไม่ใช่ error', async () => {
-  const h = harness([ok({ id: REC }), fail(404, [{ code: 81044, message: 'Record does not exist.' }])]);
-  assert.deepEqual(await h.client.deleteDnsRecord(REC), { deleted: true, alreadyGone: false });
-  assert.equal(h.calls[0].method, 'DELETE');
-  assert.equal(h.calls[0].url, `${BASE}/zones/${ZONE}/dns_records/${REC}`);
-  assert.deepEqual(await h.client.deleteDnsRecord(REC), { deleted: false, alreadyGone: true });
+// ── ลบ DNS record: ตรวจความเป็นเจ้าของก่อน และยืนยันซ้ำเมื่อ DELETE ได้ 404 ─────────────────────────────
+const HOST = 'shop.example.com';
+const rec = (over = {}) => ({ id: REC, type: 'CNAME', name: HOST, content: `${TID}.cfargotunnel.com`, proxied: true, ...over });
+const callLines = (h) => h.calls.map((c) => `${c.method} ${c.url.replace(BASE, '').replace(/\?.*$/, '')}`);
+
+test('deleteDnsRecord: list ตามชื่อก่อน แล้ว DELETE เฉพาะ record ที่ id ตรงและเป็น CNAME ชี้ tunnel ของเรา', async () => {
+  const h = harness([ok([rec()]), ok({ id: REC })]);
+  assert.deepEqual(await h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), { deleted: true, alreadyGone: false });
+  assert.deepEqual(callLines(h), [`GET /zones/${ZONE}/dns_records`, `DELETE /zones/${ZONE}/dns_records/${REC}`]);
 });
 
-test('deleteDnsRecord: recordId ที่มี / หรือ .. → ปฏิเสธก่อนยิง', async () => {
+test('deleteDnsRecord: เทียบ content แบบไม่สนตัวพิมพ์ (UUID ตัวใหญ่/เล็ก)', async () => {
+  const h = harness([ok([rec({ content: `${TID.toUpperCase()}.CFARGOTUNNEL.COM` })]), ok({ id: REC })]);
+  assert.equal((await h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID })).deleted, true);
+});
+
+test('deleteDnsRecord: record ไม่ใช่ของเรา (ชี้ tunnel อื่น / ไม่ใช่ CNAME / ชี้ที่อื่น) → throw not-owned และไม่ DELETE', async () => {
+  const others = [
+    rec({ content: `${TID2}.cfargotunnel.com` }),
+    rec({ type: 'A', content: '1.2.3.4' }),
+    rec({ type: 'TXT', content: 'hello' }),
+    rec({ content: 'example.net' }),
+    rec({ content: `${TID}.cfargotunnel.com.evil.net` }),
+  ];
+  for (const r of others) {
+    const h = harness([ok([r]), ok({ id: REC })]);
+    await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e instanceof CloudflareError && e.code === 'not-owned', JSON.stringify(r));
+    assert.deepEqual(callLines(h), [`GET /zones/${ZONE}/dns_records`], JSON.stringify(r));
+  }
+});
+
+test('deleteDnsRecord: ไม่มี id นี้ในผล list (list สำเร็จ) → alreadyGone โดยไม่ยิง DELETE', async () => {
+  const h = harness([ok([rec({ id: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz' })])]);
+  assert.deepEqual(await h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), { deleted: false, alreadyGone: true });
+  assert.deepEqual(callLines(h), [`GET /zones/${ZONE}/dns_records`]);
+});
+
+test('deleteDnsRecord: list ล้ม (เช่น zone/account ID ผิด → 403/404) → throw และไม่ DELETE (ไม่ถือว่าลบไปแล้ว)', async () => {
+  for (const status of [403, 404]) {
+    const h = harness([fail(status), ok({ id: REC })]);
+    await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e instanceof CloudflareError && e.status === status);
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test('deleteDnsRecord: DELETE ได้ 404 → list ซ้ำ; ไม่พบแล้ว = alreadyGone', async () => {
+  const h = harness([ok([rec()]), fail(404), ok([])]);
+  assert.deepEqual(await h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), { deleted: false, alreadyGone: true });
+  assert.deepEqual(callLines(h), [`GET /zones/${ZONE}/dns_records`, `DELETE /zones/${ZONE}/dns_records/${REC}`, `GET /zones/${ZONE}/dns_records`]);
+});
+
+test('deleteDnsRecord: DELETE ได้ 404 แต่ list ซ้ำยังเห็น record → throw delete-unconfirmed (ไม่สรุปว่าลบแล้ว)', async () => {
+  const h = harness([ok([rec()]), fail(404), ok([rec()])]);
+  await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e instanceof CloudflareError && e.code === 'delete-unconfirmed');
+});
+
+test('deleteDnsRecord: DELETE ได้ 404 แล้ว list ซ้ำล้ม → throw (ยืนยันไม่ได้ = ล้มเหลว)', async () => {
+  const h = harness([ok([rec()]), fail(404), fail(403)]);
+  await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e instanceof CloudflareError && e.status === 403);
+});
+
+test('deleteDnsRecord: DELETE ล้มด้วยรหัสอื่น → throw; 503 ถูก retry ตามปกติ', async () => {
+  const a = harness([ok([rec()]), fail(403)]);
+  await assert.rejects(a.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e.status === 403);
+  const b = harness([ok([rec()]), fail(503), ok({ id: REC })]);
+  assert.equal((await b.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID })).deleted, true);
+  assert.equal(b.calls.length, 3);
+});
+
+test('deleteDnsRecord: recordId/hostname/tunnelId ขาดหรือผิดรูปแบบ → ปฏิเสธก่อนยิง', async () => {
   const h = harness([]);
   for (const bad of ['../x', 'a/b', '', 'x'.repeat(40), undefined]) {
-    await assert.rejects(h.client.deleteDnsRecord(bad), (e) => e.code === 'invalid-id');
+    await assert.rejects(h.client.deleteDnsRecord(bad, { hostname: HOST, tunnelId: TID }), (e) => e.code === 'invalid-id');
   }
+  await assert.rejects(h.client.deleteDnsRecord(REC), (e) => e instanceof CloudflareError);
+  await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: 'Bad Host', tunnelId: TID }), (e) => e.code === 'invalid-argument');
+  await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: 'nope' }), (e) => e.code === 'invalid-id');
   assert.equal(h.calls.length, 0);
 });
 
-test('deleteTunnel: สำเร็จรอบแรก → ไม่เรียก cleanup connections', async () => {
-  const h = harness([ok({ id: TID })]);
-  assert.deepEqual(await h.client.deleteTunnel(TID), { deleted: true, alreadyGone: false });
+// ── ลบ tunnel: ต้องยืนยันชื่อ netguard-<บอท> ก่อน และ 404 ต้องยืนยันซ้ำ ──────────────────────────────────
+const NAME = 'netguard-shop';
+const tun = (over = {}) => ({ id: TID, name: NAME, deleted_at: null, status: 'inactive', ...over });
+const tunnelCall = (m, suffix = '') => `${m} /accounts/${ACCT}/cfd_tunnel/${TID}${suffix}`;
+
+test('findTunnelById: GET cfd_tunnel?uuid=&is_deleted=false กรองซ้ำที่ id และยังไม่ถูกลบ; list ไม่ครบ → error', async () => {
+  const h = harness([ok([tun({ id: TID2 }), tun({ deleted_at: '2026-01-01T00:00:00Z' }), tun()])]);
+  const found = await h.client.findTunnelById(TID);
+  const u = new URL(h.calls[0].url);
+  assert.equal(u.pathname, `/client/v4/accounts/${ACCT}/cfd_tunnel`);
+  assert.equal(u.searchParams.get('uuid'), TID);
+  assert.equal(u.searchParams.get('is_deleted'), 'false');
+  assert.equal(found.id, TID);
+  for (const rows of [[], [tun({ id: TID2 })], [tun({ deleted_at: '2026-01-01T00:00:00Z' })]]) {
+    const none = harness([ok(rows)]);
+    assert.equal(await none.client.findTunnelById(TID), null);
+  }
+  const bad = harness([]);
+  await assert.rejects(bad.client.findTunnelById('not-a-uuid'), (e) => e.code === 'invalid-id');
+  assert.equal(bad.calls.length, 0);
+  const partial = harness([{ status: 200, body: { success: true, errors: [], messages: [], result: [], result_info: { count: 0, total_count: 3 } } }]);
+  await assert.rejects(partial.client.findTunnelById(TID), (e) => e.code === 'invalid-response');
+});
+
+test('deleteTunnel: expectedName ต้องเป็น netguard-<บอท> เท่านั้น — อย่างอื่นปฏิเสธก่อนยิงสักคำขอ', async () => {
+  const h = harness([]);
+  for (const bad of ['bot-production', 'netguard-', 'netguard', 'Netguard-shop', 'netguard-Shop', 'netguard-sh op', 'netguard-shop\n', '', undefined, 42, 'netguard-x']) {
+    await assert.rejects(h.client.deleteTunnel(TID, { expectedName: bad }), (e) => e instanceof CloudflareError && e.code === 'invalid-argument', String(bad));
+  }
+  await assert.rejects(h.client.deleteTunnel(TID), (e) => e instanceof CloudflareError);
+  assert.equal(h.calls.length, 0);
+});
+
+test('deleteTunnel: GET ตาม id แล้วชื่อตรง → DELETE (ไม่เรียก cleanup connections ถ้าลบสำเร็จ)', async () => {
+  const h = harness([ok(tun()), ok({ id: TID })]);
+  assert.deepEqual(await h.client.deleteTunnel(TID, { expectedName: NAME }), { deleted: true, alreadyGone: false });
+  assert.deepEqual(callLines(h), [tunnelCall('GET'), tunnelCall('DELETE')]);
+});
+
+test('deleteTunnel: ชื่อ tunnel จริงไม่ตรงกับที่ state ระบุ → throw not-owned และ "ไม่ DELETE" (ป้องกันลบ tunnel production)', async () => {
+  const wrongNames = ['bot-production', 'netguard-other', 'NETGUARD-SHOP', 'netguard-shop-2', ''];
+  for (const name of wrongNames) {
+    const h = harness([ok(tun({ name })), ok({ id: TID })]);
+    await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e instanceof CloudflareError && e.code === 'not-owned', name);
+    assert.deepEqual(callLines(h), [tunnelCall('GET')], name);
+  }
+});
+
+test('deleteTunnel: state ถูกแก้ให้ชี้ ID ของ tunnel อื่น (ชื่อ production) → ปฏิเสธ; ชี้ tunnel ของบอทอื่น (netguard-other) ก็ปฏิเสธ', async () => {
+  const prod = harness([ok(tun({ id: TID2, name: 'it-monitor' }))]);
+  await assert.rejects(prod.client.deleteTunnel(TID2, { expectedName: NAME }), (e) => e.code === 'not-owned');
+  assert.deepEqual(prod.calls.map((c) => c.method), ['GET']);
+  const sibling = harness([ok(tun({ id: TID2, name: 'netguard-other' }))]);
+  await assert.rejects(sibling.client.deleteTunnel(TID2, { expectedName: NAME }), (e) => e.code === 'not-owned');
+  assert.deepEqual(sibling.calls.map((c) => c.method), ['GET']);
+});
+
+test('deleteTunnel: response ไม่มีชื่อ / id ที่ตอบไม่ตรงกับที่ขอ → ปฏิเสธ ไม่ DELETE', async () => {
+  for (const body of [tun({ name: undefined }), tun({ name: 42 }), tun({ id: TID2 }), null]) {
+    const h = harness([ok(body), ok({ id: TID })]);
+    await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e instanceof CloudflareError, JSON.stringify(body));
+    assert.deepEqual(h.calls.map((c) => c.method), ['GET'], JSON.stringify(body));
+  }
+});
+
+test('deleteTunnel: tunnel ถูกลบไปแล้ว (deleted_at มีค่า) → alreadyGone โดยไม่ DELETE', async () => {
+  const h = harness([ok(tun({ deleted_at: '2026-10-01T00:00:00Z' }))]);
+  assert.deepEqual(await h.client.deleteTunnel(TID, { expectedName: NAME }), { deleted: false, alreadyGone: true });
   assert.equal(h.calls.length, 1);
-  assert.equal(h.calls[0].method, 'DELETE');
-  assert.equal(h.calls[0].url, `${BASE}/accounts/${ACCT}/cfd_tunnel/${TID}`);
 });
 
-test('deleteTunnel: ล้ม (ไม่ว่ารหัสอะไร) → DELETE .../connections แล้วลองลบอีกครั้งเดียว (ไม่พึ่งรหัส error ที่เอกสารไม่ระบุ)', async () => {
-  const h = harness([fail(400, [{ code: 1022, message: 'active connections' }]), ok({}), ok({ id: TID })]);
-  assert.deepEqual(await h.client.deleteTunnel(TID), { deleted: true, alreadyGone: false });
-  assert.deepEqual(h.calls.map((c) => `${c.method} ${c.url.replace(BASE, '')}`), [
-    `DELETE /accounts/${ACCT}/cfd_tunnel/${TID}`,
-    `DELETE /accounts/${ACCT}/cfd_tunnel/${TID}/connections`,
-    `DELETE /accounts/${ACCT}/cfd_tunnel/${TID}`,
-  ]);
-});
-
-test('deleteTunnel: ลบซ้ำหลัง cleanup ก็ล้ม → throw (ไม่วนไม่รู้จบ) และ error อ้างขั้นตอน', async () => {
-  const h = harness([fail(400), ok({}), fail(400)]);
-  await assert.rejects(h.client.deleteTunnel(TID), (e) => e instanceof CloudflareError && /deleteTunnel/.test(e.message));
-  assert.equal(h.calls.length, 3);
-});
-
-test('deleteTunnel: cleanup connections ล้ม → throw และไม่ลองลบรอบสอง', async () => {
-  const h = harness([fail(400), fail(500, undefined), fail(500, undefined), fail(500, undefined), fail(500, undefined)], { maxRetries: 0 });
-  await assert.rejects(h.client.deleteTunnel(TID), CloudflareError);
+test('deleteTunnel: GET ได้ 404 → list ตาม uuid ยืนยัน; ไม่พบจริง = alreadyGone', async () => {
+  const h = harness([fail(404), ok([])]);
+  assert.deepEqual(await h.client.deleteTunnel(TID, { expectedName: NAME }), { deleted: false, alreadyGone: true });
+  assert.equal(new URL(h.calls[1].url).searchParams.get('uuid'), TID);
   assert.equal(h.calls.length, 2);
 });
 
-test('deleteTunnel: 404 = ลบไปแล้ว ไม่เรียก cleanup', async () => {
-  const h = harness([fail(404, [{ code: 1003, message: 'not found' }])]);
-  assert.deepEqual(await h.client.deleteTunnel(TID), { deleted: false, alreadyGone: true });
+test('deleteTunnel: GET ได้ 404 แต่ list ยังเห็น tunnel → throw delete-unconfirmed; list ล้ม → throw', async () => {
+  const seen = harness([fail(404), ok([tun()])]);
+  await assert.rejects(seen.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e.code === 'delete-unconfirmed');
+  const broken = harness([fail(404), fail(403)]);
+  await assert.rejects(broken.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e.status === 403);
+});
+
+test('deleteTunnel: GET ล้มด้วยรหัสอื่น (403 ฯลฯ) → throw และไม่ DELETE', async () => {
+  const h = harness([fail(403), ok({ id: TID })]);
+  await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e.status === 403);
   assert.equal(h.calls.length, 1);
+});
+
+test('deleteTunnel: DELETE ล้ม (รหัสอะไรก็ได้) → DELETE .../connections แล้วลบอีกครั้งเดียว โดยไม่ GET ชื่อซ้ำ', async () => {
+  const h = harness([ok(tun()), fail(400, [{ code: 1022, message: 'active connections' }]), ok({}), ok({ id: TID })]);
+  assert.deepEqual(await h.client.deleteTunnel(TID, { expectedName: NAME }), { deleted: true, alreadyGone: false });
+  assert.deepEqual(callLines(h), [tunnelCall('GET'), tunnelCall('DELETE'), tunnelCall('DELETE', '/connections'), tunnelCall('DELETE')]);
+});
+
+test('deleteTunnel: ลบซ้ำหลัง cleanup ก็ล้ม → throw (ไม่วนไม่รู้จบ) และ error อ้างขั้นตอน', async () => {
+  const h = harness([ok(tun()), fail(400), ok({}), fail(400)]);
+  await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e instanceof CloudflareError && /deleteTunnel/.test(e.message));
+  assert.equal(h.calls.length, 4);
+});
+
+test('deleteTunnel: cleanup connections ล้ม → throw และไม่ลองลบรอบสอง', async () => {
+  const h = harness([ok(tun()), fail(400), fail(500, undefined)], { maxRetries: 0 });
+  await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), CloudflareError);
+  assert.equal(h.calls.length, 3);
+});
+
+test('deleteTunnel: DELETE ได้ 404 → list ซ้ำยืนยัน; ไม่พบ = alreadyGone, ยังเห็น = delete-unconfirmed (ไม่เรียก cleanup)', async () => {
+  const gone = harness([ok(tun()), fail(404), ok([])]);
+  assert.deepEqual(await gone.client.deleteTunnel(TID, { expectedName: NAME }), { deleted: false, alreadyGone: true });
+  assert.equal(gone.calls.length, 3);
+  const still = harness([ok(tun()), fail(404), ok([tun()])]);
+  await assert.rejects(still.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e.code === 'delete-unconfirmed');
+  assert.equal(still.calls.length, 3);
 });
 
 test('deleteTunnel: tunnelId ไม่ใช่ UUID → ปฏิเสธก่อนยิง', async () => {
   const h = harness([]);
-  await assert.rejects(h.client.deleteTunnel('not-a-uuid'), (e) => e.code === 'invalid-id');
+  await assert.rejects(h.client.deleteTunnel('not-a-uuid', { expectedName: NAME }), (e) => e.code === 'invalid-id');
   assert.equal(h.calls.length, 0);
 });
 
@@ -331,12 +478,6 @@ test('retry: GET ที่ได้ 400/401/403/404 ไม่ retry (ยิง�
 test('retry: GET ที่ network error (fetch reject) ลองใหม่แล้วสำเร็จ', async () => {
   const h = harness([Object.assign(new TypeError('fetch failed'), { code: 'ECONNRESET' }), ok([])]);
   await h.client.findDnsRecords('a.example.com');
-  assert.equal(h.calls.length, 2);
-});
-
-test('retry: DELETE ที่ 503 ลองใหม่ได้', async () => {
-  const h = harness([fail(503), ok({ id: REC })]);
-  assert.deepEqual(await h.client.deleteDnsRecord(REC), { deleted: true, alreadyGone: false });
   assert.equal(h.calls.length, 2);
 });
 
@@ -524,4 +665,31 @@ test('error: cfCodes เก็บเฉพาะรหัสที่เป็�
     assert.deepEqual(e.cfCodes, [1003]);
     return true;
   });
+});
+
+test('deleteDnsRecord: record ที่ content ตรงกับของเราแต่ไม่ใช่ CNAME (TXT/A) → not-owned ไม่ DELETE', async () => {
+  for (const type of ['TXT', 'A', 'AAAA']) {
+    const h = harness([ok([rec({ type })]), ok({ id: REC })]);
+    await assert.rejects(h.client.deleteDnsRecord(REC, { hostname: HOST, tunnelId: TID }), (e) => e.code === 'not-owned', type);
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test('deleteTunnel: token หายไปกลางทาง (ขั้น DELETE) → no-token ทันที ไม่ไป cleanup connections', async () => {
+  let n = 0;
+  const h = harness([ok(tun()), ok({}), ok({ id: TID })], { getToken: () => (++n === 2 ? '' : SECRET) });
+  await assert.rejects(h.client.deleteTunnel(TID, { expectedName: NAME }), (e) => e.code === 'no-token');
+  assert.equal(h.calls.length, 1); // มีแต่ GET
+});
+
+test('timeout: ตัวจับเวลาถูกเคลียร์ทุกครั้ง (สำเร็จ/ล้ม/timeout) — ไม่ทิ้ง timer ค้างให้โปรเซสไม่ยอมจบ', async () => {
+  const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+  const before = timers();
+  const h = harness([ok([]), fail(400), hang], { timeoutMs: 30, maxRetries: 0 });
+  await h.client.findDnsRecords('a.example.com');
+  assert.equal(timers(), before); // สำเร็จ: เคลียร์ทันที (ไม่ต้องรอให้ timer หมดอายุเอง)
+  await assert.rejects(h.client.findDnsRecords('a.example.com'));
+  assert.equal(timers(), before); // HTTP error
+  await assert.rejects(h.client.findDnsRecords('a.example.com'), (e) => e.code === 'timeout');
+  assert.equal(timers(), before); // timeout
 });

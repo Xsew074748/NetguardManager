@@ -128,6 +128,24 @@ function readState(botName) {
   return doc;
 }
 
+// state ของทุกบอท (ใช้ตรวจ hostname ชนข้ามบอท) — state ของบอทใดเสียต้อง throw ไม่ข้าม เพราะจะมองไม่เห็นว่า hostname ถูกใช้อยู่
+function listStates() {
+  let entries;
+  try {
+    entries = fs.readdirSync(config.botsRoot, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !BOT_NAME_RE.test(entry.name)) continue;
+    const state = readState(entry.name);
+    if (state) out.push({ botName: entry.name, state });
+  }
+  return out;
+}
+
 function writeState(botName, input) {
   const file = statePath(botName);
   if (!isPlainObject(input)) throw invalid('state must be an object');
@@ -222,6 +240,7 @@ module.exports = {
   CloudflareStateError,
   STEPS,
   readState,
+  listStates,
   writeState,
   updateState,
   deleteState,

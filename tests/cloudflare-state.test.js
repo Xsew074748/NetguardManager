@@ -271,3 +271,91 @@ test('orphans: JSON ถูกแต่รูปแบบไม่ใช่ที
   }
   fs.rmSync(orphansFile());
 });
+
+// ── listStates (ใช้ตรวจ hostname ชนข้ามบอทใน preflight) ─────────────────────────────
+test('listStates: คืน state ของทุกบอทที่มีไฟล์ (ข้ามโฟลเดอร์ที่ไม่มีไฟล์/ชื่อไม่ใช่บอท/ไฟล์ปกติ)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ng-liststates-'));
+  const saved = process.env.BOTS_ROOT;
+  const config = require('../config');
+  const savedRoot = config.botsRoot;
+  config.botsRoot = dir;
+  try {
+    assert.deepEqual(state.listStates(), []);
+    state.writeState('alpha', valid({ hostname: 'alpha.example.com' }));
+    state.writeState('beta', valid({ hostname: 'beta.example.com', tunnelId: TID2 }));
+    fs.mkdirSync(path.join(dir, 'gamma')); // ไม่มี cloudflare.json
+    fs.mkdirSync(path.join(dir, 'Not_A_Bot')); // ชื่อไม่ใช่บอท
+    fs.mkdirSync(path.join(dir, 'Not_A_Bot'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'Not_A_Bot', 'cloudflare.json'), '{broken');
+    fs.writeFileSync(path.join(dir, 'stray-file'), 'x');
+    const list = state.listStates();
+    assert.deepEqual(list.map((s) => s.botName).sort(), ['alpha', 'beta']);
+    assert.equal(list.find((s) => s.botName === 'beta').state.hostname, 'beta.example.com');
+  } finally {
+    config.botsRoot = savedRoot;
+    process.env.BOTS_ROOT = saved;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listStates: state ของบอทใดเสีย → throw corrupt (ไม่ข้ามเงียบๆ เพราะจะมองไม่เห็น hostname ที่ถูกใช้อยู่)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ng-liststates-'));
+  const config = require('../config');
+  const savedRoot = config.botsRoot;
+  config.botsRoot = dir;
+  try {
+    state.writeState('alpha', valid());
+    fs.mkdirSync(path.join(dir, 'beta'));
+    fs.writeFileSync(path.join(dir, 'beta', 'cloudflare.json'), '{broken');
+    assert.throws(() => state.listStates(), (e) => CloudflareStateErrorLike(e) && e.code === 'corrupt');
+  } finally {
+    config.botsRoot = savedRoot;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listStates: อ่านโฟลเดอร์ไม่ได้ด้วยเหตุอื่นที่ไม่ใช่ "ไม่มี" (เช่น BOTS_ROOT เป็นไฟล์) → throw ไม่คืนรายการว่าง', () => {
+  const config = require('../config');
+  const savedRoot = config.botsRoot;
+  const file = path.join(os.tmpdir(), `ng-notadir-${Date.now()}`);
+  fs.writeFileSync(file, 'x');
+  config.botsRoot = file;
+  try {
+    assert.throws(() => state.listStates(), (e) => e.code !== undefined && e.code !== 'ENOENT');
+  } finally {
+    config.botsRoot = savedRoot;
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test('listStates: BOTS_ROOT ไม่มีอยู่ → รายการว่าง', () => {
+  const config = require('../config');
+  const savedRoot = config.botsRoot;
+  config.botsRoot = path.join(os.tmpdir(), 'ng-does-not-exist-' + Date.now());
+  try {
+    assert.deepEqual(state.listStates(), []);
+  } finally {
+    config.botsRoot = savedRoot;
+  }
+});
+
+// ── สิทธิ์ไฟล์จริง (Linux/macOS เท่านั้น — บน Windows chmod ไม่มีผล) ───────────────────────
+const posixOnly = process.platform === 'win32' ? 'chmod ไม่มีผลบน Windows — รันใน container Linux' : false;
+
+test('สิทธิ์ไฟล์จริง: cloudflare.json และ cf-orphans.json เป็น 0600 (ทั้งสร้างใหม่และเขียนทับ) ไม่ทิ้ง .tmp', { skip: posixOnly }, () => {
+  const modeOf = (f) => fs.statSync(f).mode & 0o777;
+  state.writeState('modebot', valid());
+  assert.equal(modeOf(stateFile('modebot')), 0o600);
+  state.writeState('modebot', valid({ step: 'ingress-set' }));
+  assert.equal(modeOf(stateFile('modebot')), 0o600);
+  // ไฟล์ tmp เก่าที่สิทธิ์หลวม (เช่นค้างจากการล้มรอบก่อน) ต้องไม่ทำให้ไฟล์ใหม่หลวมตาม
+  fs.writeFileSync(`${stateFile('modebot')}.tmp`, 'stale', { mode: 0o666 });
+  fs.chmodSync(`${stateFile('modebot')}.tmp`, 0o666);
+  state.writeState('modebot', valid({ step: 'dns-created' }));
+  assert.equal(modeOf(stateFile('modebot')), 0o600);
+  assert.deepEqual(fs.readdirSync(path.dirname(stateFile('modebot'))).filter((f) => f.includes('.tmp')), []);
+
+  state.addOrphan({ botName: 'modebot', hostname: 'modebot.example.com', tunnelId: TID, dnsRecordId: null, accountId: ACCT, zoneId: ZONE, reason: 'mode test' });
+  assert.equal(modeOf(orphansFile()), 0o600);
+  fs.rmSync(orphansFile());
+});
