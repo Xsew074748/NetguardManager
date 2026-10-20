@@ -323,6 +323,7 @@ function rowTemplate(bot, animIndex) {
               <button class="kebab-item" role="menuitem" data-action="edit-meta" data-name="${n}">&#9998; แก้ไขข้อมูลลูกค้า</button>
               <button class="kebab-item" role="menuitem" data-action="config" data-id="${id}" data-name="${n}">&#9881; API</button>
               ${!hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-add" data-name="${n}">&#128279; เพิ่ม Tunnel</button>` : ''}
+              ${!hasTunnel && cloudflareFeature.cloudflareAutoTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-auto" data-name="${n}">&#9889; สร้าง Tunnel อัตโนมัติ</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-log" data-name="${n}">&#128279; ดู Tunnel Log</button>` : ''}
               ${hasTunnel ? `<button class="kebab-item" role="menuitem" data-action="tunnel-remove" data-name="${n}">&#128279; ลบ Tunnel</button>` : ''}
               <div class="kebab-divider"></div>

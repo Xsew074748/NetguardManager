@@ -119,6 +119,7 @@ test('POST /bots/:name/tunnel/auto ล้มกลางทาง → 502 พร
   assert.equal(res.status, 502);
   const body = await res.json();
   assert.match(body.error, /createCname/);
+  assert.match(body.error, /step "create-dns"/);
   assert.equal(body.tunnel.step, 'create-dns');
   assert.equal((await call('POST', '/api/bots/Bad%20Name/tunnel/auto', { hostname: 'x.example.com' })).status, 400);
   assert.equal((await call('POST', '/api/bots/shop/tunnel/auto', {})).status, 400);

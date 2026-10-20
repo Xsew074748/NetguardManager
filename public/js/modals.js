@@ -51,6 +51,7 @@ function onActionClick(btn) {
   if (action === 'config') return openConfigModal(name, id);
   if (action === 'remove') return openRemoveModal(id, name);
   if (action === 'tunnel-add') return openAttachTunnelModal(name);
+  if (action === 'tunnel-auto') return openAutoTunnelModal(name);
   if (action === 'tunnel-log') return openLogModal(`Tunnel Log — ${name}`, name, true);
   if (action === 'tunnel-remove') return runDetachTunnel(name, btn);
   return runBotAction(action, id, btn);
@@ -123,8 +124,21 @@ function openCreateModal() {
   newBotToken.value = '';
   newBotToken.classList.remove('error');
   newBotCompany.value = '';
+  newBotAutoTunnel.checked = false;
+  newBotHostname.value = '';
+  updateAutoTunnelUi();
   createModal.classList.add('show');
   newBotName.focus();
+}
+
+// ส่วน "สร้าง Tunnel อัตโนมัติ" ในฟอร์มสร้างบอท: ซ่อนทั้งก้อนเมื่อ flag ปิด; ติ๊กแล้วช่อง token เดิมถูกปิด (ใช้อย่างใดอย่างหนึ่ง)
+function updateAutoTunnelUi() {
+  const on = !!cloudflareFeature.cloudflareAutoTunnel;
+  autoTunnelSection.hidden = !on;
+  const auto = on && newBotAutoTunnel.checked;
+  newBotHostnameWrap.hidden = !auto;
+  newBotToken.disabled = auto;
+  if (on) newBotHostnameHint.textContent = `ต้องเป็น <ชื่อ>.${cloudflareFeature.cloudflareZone}`;
 }
 
 function closeCreateModal() {
@@ -139,7 +153,9 @@ async function submitCreateBot() {
 
   const name = newBotName.value.trim();
   const port = parseInt(newBotPort.value, 10);
-  const tunnelToken = newBotToken.value.trim();
+  const featureOn = !!cloudflareFeature.cloudflareAutoTunnel;
+  const autoTunnel = featureOn && newBotAutoTunnel.checked;
+  const tunnelToken = autoTunnel ? '' : newBotToken.value.trim();
   const companyName = newBotCompany.value.trim();
 
   if (!NAME_RE.test(name)) {
@@ -160,14 +176,28 @@ async function submitCreateBot() {
     newBotToken.classList.add('error');
     return;
   }
+  if (autoTunnel) {
+    const problem = autoHostnameProblem(newBotHostname.value, cloudflareFeature.cloudflareZone);
+    if (problem) {
+      createError.textContent = problem;
+      createError.classList.add('show');
+      newBotHostname.classList.add('error');
+      return;
+    }
+  }
 
   createSubmitBtn.disabled = true;
   createSubmitBtn.textContent = 'กำลังสร้าง...';
   try {
-    await apiCreateBot({ name, port, tunnelToken: tunnelToken || undefined, companyName: companyName || undefined });
+    const bot = await apiCreateBot(buildCreatePayload({
+      name, port, tunnelToken, companyName, autoTunnel, hostname: newBotHostname.value, featureOn,
+    }));
     createModal.classList.remove('show');
     showToast(`สร้าง bot "${name}" สำเร็จ`, 'success');
+    const tunnelToast = tunnelToastFor(name, bot && bot.tunnel);
+    if (tunnelToast) showToast(tunnelToast.text, tunnelToast.type, tunnelToast.duration);
     loadBots();
+    refreshCfOrphans();
   } catch (err) {
     createError.textContent = err.message;
     createError.classList.add('show');
@@ -768,6 +798,20 @@ function openRemoveModal(id, name) {
     ? `ยืนยันการลบ bot "${name}" ? จะลบ Cloudflare Tunnel ของบอทนี้ไปด้วย การลบ container ไม่สามารถย้อนกลับได้`
     : `ยืนยันการลบ bot "${name}" ? การลบ container ไม่สามารถย้อนกลับได้`;
   removeDeleteFiles.checked = false;
+  // บอทที่สร้าง tunnel อัตโนมัติไว้ (มี state ใน Manager): เสนอให้ลบ Tunnel/DNS ใน Cloudflare ด้วย (ติ๊กไว้ให้ ผู้ใช้ปลดได้)
+  removeCloudflareRow.hidden = true;
+  removeCloudflareNote.hidden = true;
+  removeDeleteCloudflare.checked = false;
+  if (bot && bot.cloudflare) {
+    removeCloudflareHost.textContent = bot.cloudflare.hostname;
+    if (cloudflareFeature.cloudflareAutoTunnel) {
+      removeCloudflareRow.hidden = false;
+      removeDeleteCloudflare.checked = true;
+    } else {
+      removeCloudflareNote.hidden = false;
+      removeCloudflareNote.textContent = `บอทนี้มี Tunnel/DNS ใน Cloudflare (${bot.cloudflare.hostname}) แต่ฟีเจอร์อัตโนมัติปิดอยู่ จึงลบให้ไม่ได้ — ถ้าลบไฟล์ด้วย จะบันทึกไว้ในรายการค้างให้`;
+    }
+  }
   removeModal.classList.add('show');
 }
 
@@ -783,15 +827,142 @@ async function submitRemoveBot() {
   removeConfirmBtn.disabled = true;
   removeConfirmBtn.textContent = 'กำลังลบ...';
   try {
-    await apiRemoveBot(id, deleteFiles);
+    const bot = botsCache.find((b) => b.id === id);
+    const { deleteCloudflare } = removeRequestOptions({ bot, featureOn: !!cloudflareFeature.cloudflareAutoTunnel, checked: removeDeleteCloudflare.checked });
+    const response = await apiRemoveBot(id, deleteFiles, deleteCloudflare);
     removeModal.classList.remove('show');
-    showToast(`ลบ bot "${name}" สำเร็จ${deleteFiles ? ' (รวมไฟล์)' : ''}`, 'success');
+    const toast = removeToast(name, deleteFiles, response);
+    showToast(toast.text, toast.type, toast.duration);
     loadBots();
+    refreshCfOrphans();
   } catch (err) {
     showToast(`ลบ bot "${name}" ไม่สำเร็จ: ${err.message}`, 'error', 0);
   } finally {
     removeConfirmBtn.disabled = false;
     removeConfirmBtn.textContent = 'ลบ';
+  }
+}
+
+// ── Auto tunnel (retry) modal ──
+function openAutoTunnelModal(name) {
+  autoTunnelTarget = name;
+  autoTunnelTitle.textContent = `สร้าง Tunnel อัตโนมัติ — ${name}`;
+  autoTunnelError.classList.remove('show');
+  autoTunnelHostname.classList.remove('error');
+  autoTunnelHostname.value = '';
+  autoTunnelHint.textContent = `ต้องเป็น <ชื่อ>.${cloudflareFeature.cloudflareZone}`;
+  autoTunnelModal.classList.add('show');
+  autoTunnelHostname.focus();
+}
+
+function closeAutoTunnelModal() {
+  autoTunnelModal.classList.remove('show');
+}
+
+async function submitAutoTunnel() {
+  autoTunnelError.classList.remove('show');
+  autoTunnelHostname.classList.remove('error');
+  const problem = autoHostnameProblem(autoTunnelHostname.value, cloudflareFeature.cloudflareZone);
+  if (problem) {
+    autoTunnelError.textContent = problem;
+    autoTunnelError.classList.add('show');
+    autoTunnelHostname.classList.add('error');
+    return;
+  }
+
+  autoTunnelSubmitBtn.disabled = true;
+  autoTunnelSubmitBtn.textContent = 'กำลังสร้าง...';
+  try {
+    const res = await apiAutoTunnel(autoTunnelTarget, autoTunnelHostname.value.trim().toLowerCase());
+    autoTunnelModal.classList.remove('show');
+    const toast = tunnelToastFor(autoTunnelTarget, res.tunnel);
+    if (toast) showToast(toast.text, toast.type, toast.duration);
+    loadBots();
+    refreshCfOrphans();
+  } catch (err) {
+    autoTunnelError.textContent = err.message;
+    autoTunnelError.classList.add('show');
+  } finally {
+    autoTunnelSubmitBtn.disabled = false;
+    autoTunnelSubmitBtn.textContent = 'สร้าง Tunnel';
+  }
+}
+
+// ── Cloudflare leftovers ──
+async function refreshCfOrphans() {
+  try {
+    const res = await apiListCfOrphans();
+    cfOrphansCache = (res && res.orphans) || [];
+  } catch (err) {
+    cfOrphansCache = [];
+  }
+  cfOrphansBtn.hidden = cfOrphansCache.length === 0;
+  cfOrphansBtn.textContent = `Cloudflare ค้าง (${cfOrphansCache.length})`;
+  if (cfOrphansModal.classList.contains('show')) renderCfOrphans();
+}
+
+function openCfOrphansModal() {
+  renderCfOrphans();
+  cfOrphansModal.classList.add('show');
+}
+
+function closeCfOrphansModal() {
+  cfOrphansModal.classList.remove('show');
+}
+
+// ค่าจาก server (ชื่อบอท/hostname/เหตุผล) ใส่ด้วย textContent เท่านั้น ไม่ผ่าน innerHTML
+function renderCfOrphans() {
+  cfOrphansList.textContent = '';
+  if (cfOrphansCache.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'field-hint';
+    empty.textContent = 'ไม่มีของค้าง';
+    cfOrphansList.appendChild(empty);
+    return;
+  }
+  for (const entry of cfOrphansCache) {
+    const summary = orphanSummary(entry);
+    const row = document.createElement('div');
+    row.className = 'cf-orphan-row';
+    const info = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'cf-orphan-title';
+    title.textContent = summary.title;
+    const detail = document.createElement('div');
+    detail.className = 'cf-orphan-detail';
+    detail.textContent = summary.detail;
+    const reason = document.createElement('div');
+    reason.className = 'cf-orphan-reason';
+    reason.textContent = entry.reason || '';
+    info.appendChild(title);
+    info.appendChild(detail);
+    info.appendChild(reason);
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-teal';
+    btn.textContent = 'ล้าง';
+    btn.disabled = !cloudflareFeature.cloudflareAutoTunnel;
+    if (btn.disabled) btn.title = 'ฟีเจอร์ Cloudflare อัตโนมัติปิดอยู่ จึงล้างจากหน้านี้ไม่ได้';
+    btn.addEventListener('click', () => runCfCleanup(entry.tunnelId, btn));
+    row.appendChild(info);
+    row.appendChild(btn);
+    cfOrphansList.appendChild(row);
+  }
+}
+
+async function runCfCleanup(tunnelId, btn) {
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'กำลังล้าง...';
+  try {
+    const result = await apiCleanupCfOrphan(tunnelId);
+    const toast = cleanupToast(result);
+    showToast(toast.text, toast.type, toast.duration);
+  } catch (err) {
+    showToast(`ล้างของที่ค้างใน Cloudflare ไม่สำเร็จ: ${err.message}`, 'error', 0);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    refreshCfOrphans();
   }
 }
 

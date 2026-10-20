@@ -57,6 +57,7 @@
         </div>
       </div>
       <div class="actions">
+        <button class="btn btn-ghost" id="cfOrphansBtn" hidden>Cloudflare ค้าง</button>
         <button class="btn btn-ghost" id="auditBtn">Audit log</button>
         <button class="btn btn-ghost" id="pullImageBtn">อัปเดต Image</button>
         <button class="btn btn-teal" id="openCreateBtn">+ สร้าง Bot ใหม่</button>
@@ -161,6 +162,15 @@
           <label for="newBotPort">Port</label>
           <input type="number" id="newBotPort" min="1024" max="65535">
           <div class="field-hint">แนะนำ port ว่างถัดไปให้อัตโนมัติ (แก้ไขได้)</div>
+        </div>
+        <div class="field" id="autoTunnelSection" hidden>
+          <label class="checkbox-row"><input type="checkbox" id="newBotAutoTunnel"> สร้าง Cloudflare Tunnel อัตโนมัติ</label>
+          <div id="newBotHostnameWrap" hidden>
+            <label for="newBotHostname">Hostname</label>
+            <input type="text" id="newBotHostname" autocomplete="off" placeholder="เช่น office.example.com">
+            <div class="field-hint" id="newBotHostnameHint"></div>
+          </div>
+          <div class="field-hint">Manager จะสร้าง tunnel, ตั้ง hostname ชี้มาที่บอทนี้, สร้าง DNS และเริ่ม cloudflared ให้เอง — ถ้าติ๊กอันนี้ ช่อง Token ด้านล่างจะไม่ถูกใช้</div>
         </div>
         <div class="field">
           <label for="newBotToken">Cloudflare Tunnel Token <span style="font-weight:400;color:var(--text-dim);font-size:11px;">(optional)</span></label>
@@ -325,10 +335,54 @@
         <input type="checkbox" id="removeDeleteFiles">
         ลบข้อมูลและ .env ด้วย
       </label>
+      <label class="checkbox-row" id="removeCloudflareRow" hidden>
+        <input type="checkbox" id="removeDeleteCloudflare">
+        <span>ลบ Tunnel และ DNS ใน Cloudflare ด้วย (<span id="removeCloudflareHost"></span>)</span>
+      </label>
+      <div class="field-hint" id="removeCloudflareNote" hidden></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" id="removeCancelBtn">ยกเลิก</button>
       <button class="btn btn-danger" id="removeConfirmBtn">ลบ</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auto tunnel (retry) modal -->
+<div class="modal-overlay" id="autoTunnelModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="autoTunnelTitle">สร้าง Tunnel อัตโนมัติ</h3>
+      <button class="modal-close" id="autoTunnelModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-error" id="autoTunnelError"></div>
+      <div class="field">
+        <label for="autoTunnelHostname">Hostname</label>
+        <input type="text" id="autoTunnelHostname" autocomplete="off" placeholder="เช่น office.example.com">
+        <div class="field-hint" id="autoTunnelHint"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="autoTunnelCancelBtn">ยกเลิก</button>
+      <button class="btn btn-teal" id="autoTunnelSubmitBtn">สร้าง Tunnel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cloudflare leftovers modal -->
+<div class="modal-overlay" id="cfOrphansModal">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h3>Cloudflare ที่ค้างอยู่</h3>
+      <button class="modal-close" id="cfOrphansModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-hint">ของที่สร้างหรือลบไม่สำเร็จครบ (Tunnel / DNS / container / token ใน .env) — กด "ล้าง" เพื่อให้ Manager ลองลบต่อ</div>
+      <div id="cfOrphansList"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="cfOrphansCloseBtn">ปิด</button>
     </div>
   </div>
 </div>
@@ -405,6 +459,7 @@
 <script src="js/api.js"></script>
 <script src="js/render.js"></script>
 <script src="js/password-form.js"></script>
+<script src="js/cloudflare-ui.js"></script>
 <script src="js/stats-tabs.js"></script>
 <script src="js/audit-ui.js"></script>
 <script src="js/modals.js"></script>

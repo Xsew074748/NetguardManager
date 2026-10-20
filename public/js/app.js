@@ -33,6 +33,25 @@ const attachTunnelSubmitBtn = document.getElementById('attachTunnelSubmitBtn');
 const newBotToken = document.getElementById('newBotToken');
 const newBotCompany = document.getElementById('newBotCompany');
 
+const autoTunnelSection = document.getElementById('autoTunnelSection');
+const newBotAutoTunnel = document.getElementById('newBotAutoTunnel');
+const newBotHostnameWrap = document.getElementById('newBotHostnameWrap');
+const newBotHostname = document.getElementById('newBotHostname');
+const newBotHostnameHint = document.getElementById('newBotHostnameHint');
+const removeCloudflareRow = document.getElementById('removeCloudflareRow');
+const removeDeleteCloudflare = document.getElementById('removeDeleteCloudflare');
+const removeCloudflareHost = document.getElementById('removeCloudflareHost');
+const removeCloudflareNote = document.getElementById('removeCloudflareNote');
+const autoTunnelModal = document.getElementById('autoTunnelModal');
+const autoTunnelTitle = document.getElementById('autoTunnelTitle');
+const autoTunnelError = document.getElementById('autoTunnelError');
+const autoTunnelHostname = document.getElementById('autoTunnelHostname');
+const autoTunnelHint = document.getElementById('autoTunnelHint');
+const autoTunnelSubmitBtn = document.getElementById('autoTunnelSubmitBtn');
+const cfOrphansBtn = document.getElementById('cfOrphansBtn');
+const cfOrphansModal = document.getElementById('cfOrphansModal');
+const cfOrphansList = document.getElementById('cfOrphansList');
+
 const editMetaModal = document.getElementById('editMetaModal');
 const editMetaTitle = document.getElementById('editMetaTitle');
 const editMetaError = document.getElementById('editMetaError');
@@ -62,6 +81,10 @@ const sidebarOverlay = document.getElementById('sidebarOverlay');
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 
 let botsCache = [];
+// ฟีเจอร์ Cloudflare auto-tunnel: ปิดไว้ตั้งต้น (หน้าเว็บเหมือนเดิม) จนกว่า /api/features จะบอกว่าเปิด
+let cloudflareFeature = { cloudflareAutoTunnel: false };
+let cfOrphansCache = [];
+let autoTunnelTarget = null;
 let uptimeChart = null;
 let problemsChart = null;
 let removeTarget = null;
@@ -182,6 +205,23 @@ createModal.addEventListener('click', (e) => {
   if (e.target === createModal) closeCreateModal();
 });
 document.getElementById('createSubmitBtn').addEventListener('click', submitCreateBot);
+newBotAutoTunnel.addEventListener('change', updateAutoTunnelUi);
+
+// ── Auto tunnel (retry) modal ──
+document.getElementById('autoTunnelModalClose').addEventListener('click', closeAutoTunnelModal);
+document.getElementById('autoTunnelCancelBtn').addEventListener('click', closeAutoTunnelModal);
+autoTunnelModal.addEventListener('click', (e) => {
+  if (e.target === autoTunnelModal) closeAutoTunnelModal();
+});
+autoTunnelSubmitBtn.addEventListener('click', submitAutoTunnel);
+
+// ── Cloudflare leftovers modal ──
+cfOrphansBtn.addEventListener('click', openCfOrphansModal);
+document.getElementById('cfOrphansModalClose').addEventListener('click', closeCfOrphansModal);
+document.getElementById('cfOrphansCloseBtn').addEventListener('click', closeCfOrphansModal);
+cfOrphansModal.addEventListener('click', (e) => {
+  if (e.target === cfOrphansModal) closeCfOrphansModal();
+});
 
 // ── Attach tunnel modal ──
 document.getElementById('attachTunnelModalClose').addEventListener('click', closeAttachTunnelModal);
@@ -332,6 +372,11 @@ function initBgVideo() {
 
 // ── Init ──
 loadBots();
+// รู้ว่า Cloudflare auto-tunnel เปิดอยู่ไหม (ไม่รู้/ล้ม = ถือว่าปิด) แล้วโหลดรายการค้าง
+apiGetFeatures()
+  .then((f) => { cloudflareFeature = f; })
+  .catch(() => { /* ไม่รู้สถานะ = ปิด */ })
+  .finally(() => refreshCfOrphans());
 // เรียกผ่าน arrow function เสมอ (ไม่ใช่ setInterval(loadBots, ...) ตรงๆ) เพื่อให้ mascot.js
 // ที่โหลดทีหลังและ wrap window.loadBots ไว้ ทำงานกับ auto-refresh ได้ด้วย ไม่ใช่แค่ตอนกดปุ่ม
 refreshTimer = setInterval(() => loadBots(), 10000);

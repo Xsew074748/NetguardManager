@@ -62,8 +62,39 @@ function apiBotAction(id, action) {
   return fetchJson(`/api/bots/${id}/${action}`, { method: 'POST' });
 }
 
-function apiRemoveBot(id, deleteFiles) {
-  return fetchJson(`/api/bots/${id}?deleteFiles=${deleteFiles}`, { method: 'DELETE' });
+// deleteCloudflare ไม่ส่ง (undefined) = URL เดิมเป๊ะ; ส่ง true/false เฉพาะบอทที่มี Cloudflare state
+function apiRemoveBot(id, deleteFiles, deleteCloudflare) {
+  const cf = deleteCloudflare === undefined ? '' : `&deleteCloudflare=${deleteCloudflare}`;
+  return fetchJson(`/api/bots/${id}?deleteFiles=${deleteFiles}${cf}`, { method: 'DELETE' });
+}
+
+function apiGetFeatures() {
+  return fetchJson('/api/features');
+}
+
+// 502 = สร้างแล้วล้ม (rollback แล้ว) — รายละเอียดขั้น/rollback อยู่ใน body จึงคืน data ไม่โยน error เพื่อให้หน้าเว็บแสดงได้ครบ
+async function apiAutoTunnel(name, hostname) {
+  const res = await fetch(`/api/bots/${name}/tunnel/auto`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hostname }),
+  });
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+    throw new Error('unauthorized');
+  }
+  let data = null;
+  try { data = await res.json(); } catch (err) { /* no body */ }
+  if (res.ok || (res.status === 502 && data && data.tunnel)) return data;
+  throw new Error((data && data.error) || `request failed: ${res.status}`);
+}
+
+function apiListCfOrphans() {
+  return fetchJson('/api/cloudflare/orphans');
+}
+
+function apiCleanupCfOrphan(tunnelId) {
+  return fetchJson(`/api/cloudflare/orphans/${encodeURIComponent(tunnelId)}/cleanup`, { method: 'POST' });
 }
 
 function apiGetBotLogs(id) {

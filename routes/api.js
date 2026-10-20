@@ -7,6 +7,7 @@ const dailySummaryConfig = require('../services/daily-summary-config');
 const statsDb = require('../services/stats-db');
 const poller = require('../services/poller');
 const audit = require('../services/audit');
+const cloudflareState = require('../services/cloudflare-state');
 const logger = require('../services/logger');
 
 const router = express.Router();
@@ -26,10 +27,30 @@ function handleError(res, err, fallbackMsg) {
   res.status(status).json({ error: err.message || fallbackMsg });
 }
 
+// แนบ cloudflare:{hostname, step} ให้บอทที่มี state ของ tunnel อัตโนมัติ (ไม่มี ID/ความลับ) — อ่านทีละบอท state ของบอทใดเสียก็ไม่ทำให้รายการพัง
+function withCloudflareInfo(bots) {
+  return bots.map((bot) => {
+    const botName = typeof bot.name === 'string' ? bot.name.replace(/^netguard-/, '') : '';
+    if (!dockerService.isValidBotName(botName)) return bot;
+    try {
+      const state = cloudflareState.readState(botName);
+      return state ? { ...bot, cloudflare: { hostname: state.hostname, step: state.step } } : bot;
+    } catch (err) {
+      logger.warn(`cloudflare: could not read state for "${botName}": ${err.message}`);
+      return bot;
+    }
+  });
+}
+
+// ฟีเจอร์ที่หน้าเว็บรู้ได้ (ไม่ลับ): Cloudflare auto-tunnel เปิดอยู่ไหม + ชื่อ zone
+router.get('/features', (req, res) => {
+  res.json(dockerService.getAutoTunnelService().features());
+});
+
 router.get('/bots', async (req, res) => {
   try {
     const bots = await dockerService.listBots();
-    res.json(bots);
+    res.json(withCloudflareInfo(bots));
   } catch (err) {
     handleError(res, err, 'Failed to list bots');
   }
@@ -187,7 +208,7 @@ router.post('/bots/:name/tunnel/auto', async (req, res) => {
     res.locals.audit.detail.tunnel = tunnel.status;
     if (tunnel.status !== 'ok') {
       if (res.locals.audit) res.locals.auditError = audit.sanitizeText(tunnel.message);
-      return res.status(502).json({ error: tunnel.message, tunnel });
+      return res.status(502).json({ error: `Tunnel setup failed at step "${tunnel.step}": ${tunnel.message}`, tunnel });
     }
     res.status(201).json({ ok: true, tunnel });
   } catch (err) {

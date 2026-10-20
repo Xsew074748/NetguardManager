@@ -426,3 +426,10 @@ details.guide-accordion code { background: var(--bg-elevated); color: var(--text
 }
 .ds-remove { padding: 4px 10px; }
 .ds-live { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+/* Cloudflare auto-tunnel: ส่วนที่ซ่อนด้วย hidden ต้องไม่ถูก display ของ .btn/.field ทับ */
+#autoTunnelSection[hidden], #newBotHostnameWrap[hidden], #removeCloudflareRow[hidden], #removeCloudflareNote[hidden], #cfOrphansBtn[hidden] { display: none !important; }
+.cf-orphan-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.cf-orphan-title { font-weight: 600; word-break: break-all; }
+.cf-orphan-detail { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.cf-orphan-reason { color: var(--text-dim); font-size: 11px; margin-top: 2px; word-break: break-word; }
