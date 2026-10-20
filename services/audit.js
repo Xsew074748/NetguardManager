@@ -86,6 +86,8 @@ const ROUTE_ACTIONS = {
   'POST /image/pull': 'image.pull',
   'POST /bots/:name/tunnel': 'tunnel.attach',
   'DELETE /bots/:name/tunnel': 'tunnel.detach',
+  'POST /bots/:name/tunnel/auto': 'tunnel.auto-create',
+  'POST /cloudflare/orphans/:tunnelId/cleanup': 'cloudflare.orphan-cleanup',
   'PUT /bots/:name/meta': 'bot.meta.update',
   'PUT /bots/:name/config': 'bot.config.update',
   'PUT /bots/:name/daily-summary': 'bot.daily-summary.update',

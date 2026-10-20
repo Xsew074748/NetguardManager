@@ -66,14 +66,9 @@ function createAutoTunnelService({ settings, client, state = realState, ops, log
     if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(plan.hostname.slice(0, -suffix.length))) throw bad('hostname');
   }
 
-  // ── ย้อนกลับ/ล้างทรัพยากร ────────────────────────────────────────────────────
-  // ctx: { botName, hostname, tunnelId, dnsRecordId, containerAttempted, envAttempted, secrets }
-  // ลองครบทุกขั้นเสมอ; ขั้นที่ล้มลง orphan (พร้อม leftovers) แล้วจึงลบ state; ลง orphan ไม่ได้ = เก็บ state ไว้
-  async function rollback(ctx, why) {
-    const result = { ok: true, failed: [], orphaned: false };
-    if (ctx.unknown) result.unknown = true;
-    if (!ctx.tunnelId) return result;
-
+  // ลองทุกขั้นที่ขอ ตามลำดับ container → DNS → tunnel → token ใน .env แม้ขั้นก่อนหน้าล้ม; คืนชื่อขั้นที่ล้ม
+  // 'dns' ที่ไม่มี DNS record id = ไม่มีอะไรต้องลบ (ข้าม)
+  async function runSteps(ctx, wanted) {
     const failed = [];
     const attempt = async (name, fn) => {
       try {
@@ -83,13 +78,28 @@ function createAutoTunnelService({ settings, client, state = realState, ops, log
         logger.warn(`Cloudflare auto-tunnel: cleanup step "${name}" failed for "${ctx.botName}": ${scrub(err && err.message, ctx.secrets)}`);
       }
     };
-
-    if (ctx.containerAttempted) await attempt('container', () => ops.removeTunnelContainer(ctx.botName));
-    if (ctx.dnsRecordId) {
+    if (wanted.has('container')) await attempt('container', () => ops.removeTunnelContainer(ctx.botName));
+    if (wanted.has('dns') && ctx.dnsRecordId) {
       await attempt('dns', () => client.deleteDnsRecord(ctx.dnsRecordId, { hostname: ctx.hostname, tunnelId: ctx.tunnelId }));
     }
-    await attempt('tunnel', () => client.deleteTunnel(ctx.tunnelId, { expectedName: `netguard-${ctx.botName}` }));
-    if (ctx.envAttempted) await attempt('env-token', () => ops.clearEnvToken(ctx.botName));
+    if (wanted.has('tunnel')) await attempt('tunnel', () => client.deleteTunnel(ctx.tunnelId, { expectedName: `netguard-${ctx.botName}` }));
+    if (wanted.has('env-token')) await attempt('env-token', () => ops.clearEnvToken(ctx.botName));
+    return failed;
+  }
+
+  // ── ย้อนกลับ/ล้างทรัพยากร ────────────────────────────────────────────────────
+  // ctx: { botName, hostname, tunnelId, dnsRecordId, containerAttempted, envAttempted, secrets }
+  // ลองครบทุกขั้นเสมอ; ขั้นที่ล้มลง orphan (พร้อม leftovers) แล้วจึงลบ state; ลง orphan ไม่ได้ = เก็บ state ไว้
+  async function rollback(ctx, why) {
+    const result = { ok: true, failed: [], orphaned: false };
+    if (ctx.unknown) result.unknown = true;
+    if (!ctx.tunnelId) return result;
+
+    const wanted = new Set(['tunnel']);
+    if (ctx.containerAttempted) wanted.add('container');
+    if (ctx.dnsRecordId) wanted.add('dns');
+    if (ctx.envAttempted) wanted.add('env-token');
+    const failed = await runSteps(ctx, wanted);
 
     if (failed.length > 0) {
       result.ok = false;
@@ -219,7 +229,81 @@ function createAutoTunnelService({ settings, client, state = realState, ops, log
     }
   }
 
-  return { isEnabled, features, preflight, provision };
+  // ── ลบบอท / รายการค้าง ───────────────────────────────────────────────────────
+  // state/orphan ที่บันทึกไว้ต้องเป็นของ account+zone เดียวกับที่ตั้งอยู่ตอนนี้ — ไม่งั้น client (ผูกกับ account/zone ปัจจุบัน) จะลบผิดที่/ได้ 404 แล้วเข้าใจผิด
+  function assertSameAccount(record) {
+    if (record.accountId !== settings.accountId || record.zoneId !== settings.zoneId) {
+      throw new PreflightError('Stored Cloudflare account/zone differs from the configured one — refusing to touch it', 409, 'account-mismatch');
+    }
+  }
+
+  // ล้าง Cloudflare ของบอทตอนลบบอท: container → DNS → tunnel → token ใน .env → state; ขั้นที่ล้มลง orphan (ดู rollback)
+  async function teardown(botName, { reason = 'teardown' } = {}) {
+    requireEnabled();
+    const st = state.readState(botName); // state เสีย → โยน corrupt (ไม่ลบอะไรมั่ว)
+    if (!st) return { status: 'none' };
+    assertSameAccount(st);
+    const ctx = {
+      botName, hostname: st.hostname, tunnelId: st.tunnelId, dnsRecordId: st.dnsRecordId,
+      containerAttempted: true, envAttempted: true, unknown: false, secrets: [],
+    };
+    const rolled = await rollback(ctx, reason);
+    return { status: rolled.ok ? 'removed' : 'partial', rollback: rolled };
+  }
+
+  // ผู้ใช้เลือกลบบอทโดยไม่ลบ Cloudflare (หรือ flag ปิดอยู่) และจะลบไฟล์บอท: ลงรายการค้างก่อน ไม่ให้ tunnel/DNS หายจากการติดตามเงียบๆ
+  // ไม่ต้องใช้ client จึงใช้ได้แม้ flag ปิด; ลง orphan ไม่ได้ = โยน error และไม่ลบ state
+  function recordKept(botName) {
+    const st = state.readState(botName);
+    if (!st) return { recorded: false };
+    state.addOrphan({
+      botName,
+      hostname: st.hostname,
+      tunnelId: st.tunnelId,
+      dnsRecordId: st.dnsRecordId,
+      accountId: st.accountId,
+      zoneId: st.zoneId,
+      reason: 'kept at bot removal (Cloudflare resources were not deleted)',
+      leftovers: st.dnsRecordId ? ['dns', 'tunnel'] : ['tunnel'],
+    });
+    state.deleteState(botName);
+    return { recorded: true };
+  }
+
+  function listOrphans() {
+    return state.listOrphans();
+  }
+
+  // ทำขั้นที่ยังค้างของรายการ orphan ต่อ; สำเร็จหมด = ลบรายการ, ไม่หมด = อัปเดตให้เหลือเฉพาะที่ยังค้าง
+  async function cleanupOrphan(tunnelId) {
+    requireEnabled();
+    if (!isValidTunnelId(tunnelId)) throw new PreflightError('Invalid tunnel id', 400, 'invalid-tunnel-id');
+    const entry = state.listOrphans().find((o) => o.tunnelId === tunnelId);
+    if (!entry) throw new PreflightError('No such leftover entry', 404, 'not-found');
+    assertSameAccount(entry);
+
+    const wanted = new Set(entry.leftovers.length > 0 ? entry.leftovers : ['container', 'dns', 'tunnel', 'env-token']);
+    const ctx = { botName: entry.botName, hostname: entry.hostname, tunnelId, dnsRecordId: entry.dnsRecordId, secrets: [] };
+    const failed = await runSteps(ctx, wanted);
+    if (failed.length === 0) {
+      state.removeOrphan(tunnelId);
+      logger.info(`Cloudflare auto-tunnel: leftovers for "${entry.botName}" cleaned up`);
+      return { status: 'cleaned', failed: [] };
+    }
+    state.addOrphan({
+      botName: entry.botName,
+      hostname: entry.hostname,
+      tunnelId,
+      dnsRecordId: failed.includes('dns') ? entry.dnsRecordId : null,
+      accountId: entry.accountId,
+      zoneId: entry.zoneId,
+      reason: `cleanup retry incomplete: ${failed.join(',')}`,
+      leftovers: failed,
+    });
+    return { status: 'partial', failed };
+  }
+
+  return { isEnabled, features, preflight, provision, teardown, recordKept, listOrphans, cleanupOrphan };
 }
 
 module.exports = { createAutoTunnelService, scrub, isDefiniteRejection };

@@ -134,9 +134,13 @@ router.post('/bots/:id/restart', async (req, res) => {
 router.delete('/bots/:id', async (req, res) => {
   try {
     const deleteFiles = req.query.deleteFiles === 'true';
-    res.locals.audit.detail = { deleteFiles };
-    await dockerService.removeBot(req.params.id, { deleteFiles });
-    res.json({ ok: true });
+    // ลบ tunnel+DNS ใน Cloudflare ด้วยก็ต่อเมื่อระบุ "true" ชัดเจน (หน้าเว็บติ๊กไว้ให้หลังหน้ายืนยัน); ค่าอื่น/ไม่ส่ง = ไม่ลบของใน Cloudflare
+    const deleteCloudflare = req.query.deleteCloudflare === 'true' ? true : (req.query.deleteCloudflare === 'false' ? false : undefined);
+    res.locals.audit.detail = { deleteFiles, deleteCloudflare: deleteCloudflare === true };
+    const result = await dockerService.removeBot(req.params.id, { deleteFiles, deleteCloudflare });
+    const cloudflare = result && typeof result === 'object' ? result.cloudflare : undefined;
+    if (cloudflare) res.locals.audit.detail.cloudflare = cloudflare.status;
+    res.json(cloudflare ? { ok: true, cloudflare } : { ok: true });
   } catch (err) {
     handleError(res, err, `Failed to remove ${req.params.id}`);
   }
@@ -167,6 +171,27 @@ router.post('/bots/:name/tunnel', async (req, res) => {
     res.status(201).json({ ok: true });
   } catch (err) {
     handleError(res, err, `Failed to attach tunnel for ${req.params.name}`);
+  }
+});
+
+// สร้าง tunnel อัตโนมัติให้บอทที่มีอยู่แล้ว (ปุ่ม "ลองใหม่"): ล้มกลางทาง = rollback แล้วตอบ 502 พร้อมรายละเอียดขั้น
+router.post('/bots/:name/tunnel/auto', async (req, res) => {
+  if (!requireValidBotName(req, res)) return;
+  try {
+    const { hostname } = req.body || {};
+    if (typeof hostname !== 'string' || hostname === '') {
+      return res.status(400).json({ error: 'hostname is required' });
+    }
+    res.locals.audit.detail = { hostname };
+    const tunnel = await dockerService.retryAutoTunnel(req.params.name, hostname);
+    res.locals.audit.detail.tunnel = tunnel.status;
+    if (tunnel.status !== 'ok') {
+      if (res.locals.audit) res.locals.auditError = audit.sanitizeText(tunnel.message);
+      return res.status(502).json({ error: tunnel.message, tunnel });
+    }
+    res.status(201).json({ ok: true, tunnel });
+  } catch (err) {
+    handleError(res, err, `Failed to create tunnel for ${req.params.name}`);
   }
 });
 
@@ -344,6 +369,28 @@ router.get('/bots/:name/tunnel/logs', async (req, res) => {
 });
 
 // ดู audit log (ใหม่สุดก่อน) — ?action=bot.  (prefix) &result=ok|fail|denied|warn &limit=&offset=
+// Cloudflare ที่ค้างจากการลบ/rollback ที่ไม่สมบูรณ์ (ไม่มีความลับ)
+router.get('/cloudflare/orphans', async (req, res) => {
+  try {
+    res.json({ orphans: await dockerService.listCloudflareOrphans() });
+  } catch (err) {
+    handleError(res, err, 'Failed to read Cloudflare leftovers');
+  }
+});
+
+router.post('/cloudflare/orphans/:tunnelId/cleanup', async (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.tunnelId)) {
+    return res.status(400).json({ error: 'Invalid tunnel id' });
+  }
+  try {
+    const result = await dockerService.cleanupCloudflareOrphan(req.params.tunnelId);
+    res.locals.audit.detail = { cleanup: result.status };
+    res.json(result);
+  } catch (err) {
+    handleError(res, err, 'Failed to clean up Cloudflare leftovers');
+  }
+});
+
 router.get('/audit', (req, res) => {
   try {
     const result = ['ok', 'fail', 'denied', 'warn'].includes(req.query.result) ? req.query.result : undefined;

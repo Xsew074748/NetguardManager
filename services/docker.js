@@ -477,7 +477,7 @@ async function restartBot(id) {
   await toggleTunnel(detail, 'restart');
 }
 
-async function removeBot(id, { deleteFiles = false } = {}) {
+async function removeBotPlain(id, { deleteFiles = false } = {}) {
   const container = docker.getContainer(id);
   const detail = await assertManaged(container);
   const labels = (detail.Config && detail.Config.Labels) || {};
@@ -724,7 +724,96 @@ async function createBot(args) {
   });
 }
 
+function codedError(message, statusCode, code) {
+  const err = validationError(message, statusCode);
+  err.code = code;
+  return err;
+}
+
+// ลบบอท: บอทที่ไม่มี state ของ Cloudflare = removeBotPlain เดิมทุกอย่าง (คืน undefined)
+// บอทที่มี state (สร้างด้วย tunnel อัตโนมัติ):
+//   deleteCloudflare === true  → ล้าง Cloudflare ก่อน (container → DNS → tunnel → token ใน .env; ขั้นที่ล้มลง orphan ไม่หยุด) แล้วค่อยลบบอท
+//   ไม่ได้สั่งลบ (หรือไม่ส่ง)   → ลบเฉพาะบอท; ถ้าลบไฟล์ด้วยจะลง orphan ก่อน เพื่อไม่ให้ tunnel/DNS ที่ค้างหายจากการติดตามเงียบๆ
+// ค่า deleteCloudflare ฝั่ง server ต้องระบุ true ชัดเจน (หน้าเว็บติ๊กไว้ให้เป็นค่าเริ่มต้นหลังหน้ายืนยัน) — API ที่ไม่ส่งมาจะไม่ลบของใน Cloudflare
+async function removeBot(id, options = {}) {
+  const container = docker.getContainer(id);
+  const detail = await assertManaged(container);
+  const labels = (detail.Config && detail.Config.Labels) || {};
+  const botName = labels['netguard.botname'] || stripLeadingSlash(detail.Name).replace(/^netguard-/, '');
+  if (!isValidBotName(botName)) return removeBotPlain(id, options);
+
+  let state;
+  try {
+    state = cloudflareState.readState(botName);
+  } catch (err) {
+    throw codedError(`Cloudflare state for "${botName}" is unreadable (${err.message}) — fix or remove its cloudflare.json before removing the bot`, 409, 'state-unreadable');
+  }
+  if (!state) return removeBotPlain(id, options);
+
+  const service = getAutoTunnelService();
+  const wantCloudflare = options.deleteCloudflare === true;
+  if (wantCloudflare && !service.isEnabled()) {
+    throw codedError('Cannot delete Cloudflare resources: auto-tunnel is not enabled on this manager (remove the bot without deleting Cloudflare resources to record them as leftovers)', 409, 'disabled');
+  }
+
+  return botLock.withBotLock(botName, async () => {
+    let cloudflare;
+    if (wantCloudflare) {
+      const torn = await service.teardown(botName, { reason: 'bot removal' });
+      cloudflare = { status: torn.status, rollback: torn.rollback };
+    } else {
+      if (options.deleteFiles) service.recordKept(botName);
+      cloudflare = { status: 'kept' };
+    }
+    await removeBotPlain(id, options);
+    return { cloudflare };
+  });
+}
+
+// สร้าง tunnel อัตโนมัติให้บอทที่มีอยู่แล้ว (ปุ่ม "ลองใหม่"): ต้องมีบอท ไม่มี container cloudflared; state ค้างที่ยังไม่จบถูกล้างก่อน
+// คืนผลแบบ summarizeTunnelResult (ok/failed) — ล้มกลางทางไม่ throw เพื่อให้ผู้เรียกแสดงรายละเอียดและรู้ว่า rollback แล้ว
+async function retryAutoTunnel(botName, hostname) {
+  const service = getAutoTunnelService();
+  if (!service.isEnabled()) throw validationError('Cloudflare auto-tunnel is not enabled on this manager', 403);
+
+  return botLock.withBotLock(botName, async () => {
+    try {
+      await assertManaged(docker.getContainer(`netguard-${botName}`));
+    } catch (err) {
+      if (err.statusCode === 404) throw validationError(`Bot "${botName}" not found`, 404);
+      throw err;
+    }
+    if ((await getTunnelStatus(botName)).exists) throw validationError(`Tunnel for "${botName}" already exists`, 409);
+
+    const earlier = cloudflareState.readState(botName);
+    if (earlier && earlier.step !== 'complete') {
+      const cleaned = await service.teardown(botName, { reason: 'incomplete earlier attempt' });
+      if (cleaned.status !== 'removed') {
+        throw codedError('Could not fully clean up an earlier incomplete attempt — see the Cloudflare leftovers list', 409, 'cleanup-incomplete');
+      }
+    }
+    const plan = await service.preflight(botName, hostname);
+    return summarizeTunnelResult(await service.provision(botName, plan));
+  });
+}
+
+function listCloudflareOrphans() {
+  return getAutoTunnelService().listOrphans();
+}
+
+// ล้างของค้างตามรายการ orphan (ถือล็อกของบอทเจ้าของรายการ)
+async function cleanupCloudflareOrphan(tunnelId) {
+  const service = getAutoTunnelService();
+  if (!service.isEnabled()) throw validationError('Cloudflare auto-tunnel is not enabled on this manager', 403);
+  const entry = service.listOrphans().find((o) => o.tunnelId === tunnelId);
+  if (!entry) throw validationError('No such leftover entry', 404);
+  return botLock.withBotLock(entry.botName, () => service.cleanupOrphan(tunnelId));
+}
+
 module.exports = {
+  retryAutoTunnel,
+  listCloudflareOrphans,
+  cleanupCloudflareOrphan,
   getAutoTunnelService,
   setAutoTunnelServiceForTests,
   autoTunnelOps,
