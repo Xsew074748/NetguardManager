@@ -481,3 +481,12 @@ test('ข้อความ error ที่ยาวมากถูกตัด�
   const result = await service.provision('shop', PLAN);
   assert.ok(result.message.length <= 301, String(result.message.length));
 });
+
+test('log ตอน provision สำเร็จ ไม่อ้างว่า tunnel "พร้อม/ออนไลน์" — บอกว่าสร้างแล้วและยังไม่ตรวจการเชื่อมต่อ', async () => {
+  const { service, logs } = harness();
+  await service.provision('shop', PLAN);
+  const line = logs.find((l) => /shop/.test(l) && /tunnel/i.test(l));
+  assert.ok(line, logs.join('\n'));
+  assert.match(line, /not verified/);
+  assert.doesNotMatch(line, /\bready\b|online/i);
+});

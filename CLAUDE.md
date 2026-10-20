@@ -278,6 +278,7 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - **ลบบอท** (`DELETE /api/bots/:id?deleteCloudflare=true`): ล้าง Cloudflare เฉพาะบอทที่มี state และ server ต้องได้ `true` ชัดเจน (หน้าเว็บติ๊กไว้ให้หลังหน้ายืนยัน); ไม่ลบ Cloudflare แต่ลบไฟล์ → ลง orphan ก่อน (ไม่ให้หายเงียบ); state เสีย = ปฏิเสธการลบ (409)
 - **กันลบผิดตัว**: ลบ tunnel ต้อง GET ตาม ID แล้วชื่อตรง `netguard-<บอท>` เป๊ะ (state ถูกแก้ให้ชี้ tunnel production/บอทอื่น = ไม่ลบ); ลบ DNS เฉพาะ CNAME ที่ชี้ tunnel ของเรา; DELETE ได้ 404 ต้อง list ซ้ำยืนยัน; state/orphan ของ account/zone อื่นจากที่ตั้งไว้ = ปฏิเสธ
 - **ข้อควรรู้/ยังไม่ยืนยันกับ API จริง** (มนุษย์ต้องทดสอบก่อนเปิดใช้): การกรอง DNS ด้วย `name.exact`, พฤติกรรม GET tunnel ที่ถูกลบแล้ว (รองรับทั้ง 404 และ deleted_at), rate limit; การตรวจว่า tunnel "ขึ้นจริง" (มี connection) หลังเริ่ม cloudflared ยังไม่ได้ทำ
+- ความหมายของ `tunnel.status:"ok"` / state `complete`: สร้าง tunnel + ingress + DNS ครบและ **เริ่ม** container cloudflared แล้วเท่านั้น ไม่ได้ตรวจว่าเชื่อมต่อกับ Cloudflare ได้ — หน้าเว็บจึงไม่ใช้คำว่า "ออนไลน์/เชื่อมต่อแล้ว" (ไอคอน Tunnel ในตารางอิงสถานะ container)
 - แนะนำใช้บัญชี/โดเมน Cloudflare แยกสำหรับ tunnel อัตโนมัติ (สิทธิ์ Tunnel Edit เป็นระดับ account จำกัดรายตัว tunnel ไม่ได้)
 - ทดสอบ: tests/cloudflare*.test.js, bot-lock.test.js (Cloudflare/Docker จำลองทั้งหมด); รันใน container Linux ได้ด้วย image ของ Manager (`--network none --user 0 --entrypoint sh`, คัดลอก /app มาวางไฟล์ทับ) — เทสต์สิทธิ์ไฟล์ 0600 จริงข้ามบน Windows
 

@@ -114,7 +114,8 @@ function statusLabel(state) {
 function tunnelIcon(tunnel) {
   if (!tunnel || !tunnel.exists) return '';
   const ok = tunnel.state === 'running';
-  const title = ok ? 'Tunnel เชื่อมต่ออยู่' : 'Tunnel ล่ม';
+  // อิงสถานะ container cloudflared เท่านั้น (ไม่ได้ตรวจว่าเชื่อมต่อกับ Cloudflare ได้) — ถ้อยคำต้องไม่อ้างเกินนั้น
+  const title = ok ? 'Tunnel: container cloudflared ทำงานอยู่ (ยังไม่ได้ตรวจการเชื่อมต่อกับ Cloudflare)' : 'Tunnel: container cloudflared ไม่ทำงาน';
   return `<span class="tunnel-icon ${ok ? 'ok' : 'down'}" title="${title}">&#128279;</span>`;
 }
 

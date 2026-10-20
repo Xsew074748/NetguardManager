@@ -219,7 +219,7 @@ function createAutoTunnelService({ settings, client, state = realState, ops, log
       state.updateState(botName, { step: 'container-started' });
       state.updateState(botName, { step: 'complete' });
 
-      logger.info(`Cloudflare auto-tunnel: tunnel ready for "${botName}" (${plan.hostname})`);
+      logger.info(`Cloudflare auto-tunnel: tunnel created and cloudflared started for "${botName}" (${plan.hostname}) — connection not verified`);
       return { status: 'ok', hostname: plan.hostname, tunnelId: tunnel.id };
     } catch (err) {
       const message = scrub(err && err.message, ctx.secrets);

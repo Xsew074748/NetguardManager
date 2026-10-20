@@ -48,7 +48,8 @@ function cfRollbackText(rollback) {
 function tunnelToastFor(botName, tunnel) {
   if (!tunnel) return null;
   if (tunnel.status === 'ok') {
-    return { type: 'success', text: `สร้าง Tunnel ของ "${botName}" ที่ ${tunnel.hostname} สำเร็จ` };
+    // status ok = สร้าง tunnel/DNS ครบและเริ่ม cloudflared แล้วเท่านั้น — ยังไม่ได้ตรวจว่าต่อกับ Cloudflare ได้จริง ถ้อยคำจึงต้องไม่สื่อว่าใช้งานได้จริงแล้ว
+    return { type: 'success', text: `สร้าง Tunnel ของ "${botName}" ที่ ${tunnel.hostname} และเริ่ม cloudflared แล้ว — ยังไม่ได้ตรวจว่าเชื่อมต่อกับ Cloudflare ได้ ดูผลที่เมนู "ดู Tunnel Log"` };
   }
   const rolled = cfRollbackText(tunnel.rollback);
   return {

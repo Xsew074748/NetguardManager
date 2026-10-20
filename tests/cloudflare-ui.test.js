@@ -501,3 +501,47 @@ test('ข้อความตรวจ hostname บอกเหตุผลเ�
   assert.match(t.text, /ปุ่ม "Cloudflare ค้าง"/);
   assert.doesNotMatch(t.text, /log ของ Manager/);
 });
+
+// ── ถ้อยคำต้องไม่สื่อว่า "ออนไลน์/เชื่อมต่อแล้ว" เมื่อทำแค่สร้าง tunnel เสร็จ (ยังไม่ได้ตรวจการเชื่อมต่อ) ──────────────
+const CLAIMS_ONLINE = /ออนไลน์|online|เชื่อมต่ออยู่|เชื่อมต่อแล้ว|เชื่อมต่อได้แล้ว|พร้อมใช้งาน|ใช้งานได้แล้ว|ขึ้นแล้ว|ทำงานได้แล้ว/i;
+
+test('toast หลังสร้าง tunnel สำเร็จ: บอกว่าสร้าง/เริ่ม cloudflared แล้ว และ "ยังไม่ได้ตรวจการเชื่อมต่อ" — ไม่อ้างว่าออนไลน์', () => {
+  const { tunnelToastFor } = loadUi();
+  const t = tunnelToastFor('shop', { status: 'ok', hostname: 'shop.example.com' });
+  assert.equal(t.type, 'success');
+  assert.match(t.text, /shop\.example\.com/);
+  assert.match(t.text, /ยังไม่ได้ตรวจ/);
+  assert.match(t.text, /Tunnel Log/);
+  assert.doesNotMatch(t.text, CLAIMS_ONLINE);
+});
+
+test('ป้ายไอคอน Tunnel ในตาราง: อิงสถานะ container เท่านั้น จึงต้องบอกแบบนั้น (ไม่ใช่ "เชื่อมต่ออยู่")', () => {
+  const sandbox = vm.createContext({
+    document: { createElement: () => ({}) },
+    toastContainer: {},
+    window: { matchMedia: () => ({ matches: false }) },
+    setTimeout, clearTimeout, performance: { now: () => 0 }, requestAnimationFrame: () => {}, console,
+  });
+  vm.runInContext(read('js/render.js'), sandbox);
+  assert.equal(sandbox.tunnelIcon(undefined), '');
+  assert.equal(sandbox.tunnelIcon({ exists: false }), '');
+  const up = sandbox.tunnelIcon({ exists: true, state: 'running' });
+  assert.match(up, /container/);
+  assert.match(up, /ยังไม่ได้ตรวจ/);
+  assert.doesNotMatch(up, CLAIMS_ONLINE);
+  const down = sandbox.tunnelIcon({ exists: true, state: 'exited' });
+  assert.match(down, /ไม่ทำงาน/);
+  assert.doesNotMatch(down, CLAIMS_ONLINE);
+});
+
+test('ข้อความของฟีเจอร์ใหม่ใน cloudflare-ui.js และส่วน HTML ใหม่ ไม่มีถ้อยคำที่อ้างว่าออนไลน์/เชื่อมต่อแล้ว', () => {
+  assert.doesNotMatch(read('js/cloudflare-ui.js'), CLAIMS_ONLINE);
+  const html = read('index.html');
+  const start = html.indexOf('id="autoTunnelSection"');
+  const end = html.indexOf('</div>', html.indexOf('วิธีหา Token') - 600);
+  assert.ok(start > 0 && end > start);
+  assert.doesNotMatch(html.slice(start - 40, end), CLAIMS_ONLINE);
+  assert.match(html, /ยังไม่ตรวจว่าเชื่อมต่อได้/);
+  const modal = html.slice(html.indexOf('id="autoTunnelModal"'), html.indexOf('id="cfOrphansModal"'));
+  assert.doesNotMatch(modal, CLAIMS_ONLINE);
+});
