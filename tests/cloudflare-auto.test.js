@@ -490,3 +490,18 @@ test('log ตอน provision สำเร็จ ไม่อ้างว่า 
   assert.match(line, /not verified/);
   assert.doesNotMatch(line, /\bready\b|online/i);
 });
+
+test('token จริงรูปแบบ Cloudflare (240 ตัว, base64 มี + / =): ไม่รั่วแม้เป็นบางช่วง ทั้งผลลัพธ์/log/orphan เมื่อ error มี token ปน (ทั้งทาง create และ getTunnelToken)', async () => {
+  const { TUNNEL_TOKEN_240 } = require('./fixtures/cloudflare-live-2026-10-20');
+  for (const fromCreate of [true, false]) {
+    reset();
+    const h = harness({ tokenValue: TUNNEL_TOKEN_240, tokenFromCreate: fromCreate, leak: true, failAt: { startTunnelContainer: new Error('docker boom'), deleteTunnel: new Error('x') } });
+    const result = await h.service.provision('shop', PLAN);
+    assert.equal(result.status, 'failed');
+    const sweep = [JSON.stringify(result), h.logs.join('\n'), fs.readFileSync(orphansFile(), 'utf8')].join('\n');
+    // ไม่มีช่วงใดของ token ยาว 30 ตัวโผล่ (ตรวจทุกช่วง ไม่ใช่แค่ทั้งก้อน)
+    for (let i = 0; i + 30 <= TUNNEL_TOKEN_240.length; i += 5) {
+      assert.ok(!sweep.includes(TUNNEL_TOKEN_240.slice(i, i + 30)), `fromCreate=${fromCreate} offset ${i}`);
+    }
+  }
+});
