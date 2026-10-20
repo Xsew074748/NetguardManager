@@ -5,11 +5,15 @@ const Docker = require('dockerode');
 const config = require('../config');
 const logger = require('./logger');
 const metaService = require('./meta');
+const botLock = require('./bot-lock');
+const cloudflareSettings = require('./cloudflare-settings');
+const cloudflareState = require('./cloudflare-state');
+const { createCloudflareClient } = require('./cloudflare');
+const { createAutoTunnelService } = require('./cloudflare-auto');
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 const BOT_NAME_RE = /^[a-z0-9][a-z0-9-]{1,30}$/;
-const CLOUDFLARED_IMAGE = 'cloudflare/cloudflared:latest';
 
 const ENV_TEMPLATE = `# ---- LINE ----------------------------------------
 LINE_CHANNEL_SECRET=
@@ -336,7 +340,7 @@ function resolveBotImage(name, image) {
   return image;
 }
 
-async function createBot({ name, port, tunnelToken, companyName, image }) {
+async function createBotPlain({ name, port, tunnelToken, companyName, image }) {
   if (!isValidBotName(name)) {
     throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
   }
@@ -533,18 +537,31 @@ async function pullLatestImage() {
   return pullImage(config.botImage);
 }
 
-async function createTunnel(botName, token) {
-  await ensureImage(CLOUDFLARED_IMAGE);
+// viaEnv: ส่ง token ผ่าน env TUNNEL_TOKEN แทนอาร์กิวเมนต์ --token (ไม่โผล่ในรายการโปรเซส; ยังเห็นได้ใน docker inspect เหมือนกัน) — ใช้กับ tunnel อัตโนมัติ
+// localImageOnly: ไม่ pull image ให้ (บน gnet ใช้ image ที่ tag ตรึงเวอร์ชันไว้แล้ว) — ไม่มีในเครื่องให้ล้มพร้อมข้อความชัดเจน
+async function createTunnel(botName, token, { viaEnv = false, localImageOnly = false } = {}) {
+  const image = config.cloudflaredImage;
+  if (localImageOnly) {
+    try {
+      await docker.getImage(image).inspect();
+    } catch (err) {
+      throw validationError(`cloudflared image "${image}" is not available locally (auto-tunnel never pulls images)`, 503);
+    }
+  } else {
+    await ensureImage(image);
+  }
   const containerName = `netguard-${botName}-cloudflared`;
   const container = await docker.createContainer({
-    Image: CLOUDFLARED_IMAGE,
+    Image: image,
     name: containerName,
     Labels: {
       'netguard.managed': 'true',
       'netguard.botname': botName,
       'netguard.role': 'tunnel',
     },
-    Cmd: ['tunnel', '--no-autoupdate', 'run', '--token', token],
+    ...(viaEnv
+      ? { Env: [`TUNNEL_TOKEN=${token}`], Cmd: ['tunnel', '--no-autoupdate', 'run'] }
+      : { Cmd: ['tunnel', '--no-autoupdate', 'run', '--token', token] }),
     HostConfig: {
       RestartPolicy: { Name: 'always' },
     },
@@ -623,7 +640,94 @@ async function detachTunnel(botName) {
   }
 }
 
+// ── Cloudflare Tunnel อัตโนมัติ (ปิดเป็นค่าเริ่มต้น — ดู services/cloudflare-settings.js) ─────────────────────
+function botEnvPath(botName) {
+  return path.join(config.botsRoot, botName, '.env');
+}
+
+// ops ของ Docker/ไฟล์ที่ตัวประสานงาน (services/cloudflare-auto.js) เรียกใช้
+const autoTunnelOps = {
+  async writeEnvToken(botName, token) {
+    setEnvValue(botEnvPath(botName), 'CLOUDFLARE_TUNNEL_TOKEN', token);
+  },
+  async clearEnvToken(botName) {
+    const envPath = botEnvPath(botName);
+    if (fs.existsSync(envPath)) setEnvValue(envPath, 'CLOUDFLARE_TUNNEL_TOKEN', '');
+  },
+  async startTunnelContainer(botName, token) {
+    return createTunnel(botName, token, { viaEnv: true, localImageOnly: true });
+  },
+  async removeTunnelContainer(botName) {
+    const tunnelContainer = docker.getContainer(`netguard-${botName}-cloudflared`);
+    try {
+      await tunnelContainer.stop();
+    } catch (err) {
+      if (err.statusCode !== 304 && err.statusCode !== 404) throw err;
+    }
+    try {
+      await tunnelContainer.remove();
+    } catch (err) {
+      if (err.statusCode !== 404) throw err;
+    }
+  },
+};
+
+let autoTunnelService = null;
+
+function getAutoTunnelService() {
+  if (!autoTunnelService) {
+    const settings = cloudflareSettings.loadSettings();
+    cloudflareSettings.logSettings(settings, logger);
+    const client = settings.enabled
+      ? createCloudflareClient({ accountId: settings.accountId, zoneId: settings.zoneId, getToken: settings.readToken, timeoutMs: settings.timeoutMs })
+      : null;
+    autoTunnelService = createAutoTunnelService({ settings, client, state: cloudflareState, ops: autoTunnelOps, logger });
+  }
+  return autoTunnelService;
+}
+
+// สำหรับเทสต์เท่านั้น: ฉีด service จำลอง (null = กลับไปสร้างจาก env ใหม่)
+function setAutoTunnelServiceForTests(service) {
+  autoTunnelService = service;
+}
+
+function summarizeTunnelResult(result) {
+  if (result.status === 'ok') return { status: 'ok', hostname: result.hostname };
+  return { status: 'failed', step: result.step, message: result.message, hostname: result.hostname, rollback: result.rollback };
+}
+
+// ไม่ติ๊ก autoTunnel = createBotPlain เดิมทุกอย่าง (รวมทางกรอก token เอง)
+// ติ๊ก autoTunnel: ตรวจ preflight (อ่านอย่างเดียว) ก่อนสร้างอะไร → สร้างบอท → tunnel; tunnel ล้ม = rollback Cloudflare แต่ "เก็บบอทไว้" (ลองใหม่ได้)
+async function createBot(args) {
+  const { name, port, tunnelToken, hostname } = args || {};
+  if (!args || !args.autoTunnel) return createBotPlain(args);
+
+  const service = getAutoTunnelService();
+  if (!service.isEnabled()) {
+    throw validationError('Cloudflare auto-tunnel is not enabled on this manager', 403);
+  }
+  if (tunnelToken) {
+    throw validationError('Choose either an automatic tunnel or a tunnel token, not both', 400);
+  }
+  if (!isValidBotName(name)) {
+    throw validationError('Invalid bot name — use lowercase letters, numbers, and hyphens only (2-31 chars, must start with a letter or digit)');
+  }
+  if (!isValidPort(Number(port))) {
+    throw validationError('Invalid port — must be an integer between 1024 and 65535');
+  }
+
+  return botLock.withBotLock(name, async () => {
+    const plan = await service.preflight(name, hostname);
+    const bot = await createBotPlain({ ...args, tunnelToken: undefined });
+    const result = await service.provision(name, plan);
+    return { ...bot, tunnel: summarizeTunnelResult(result) };
+  });
+}
+
 module.exports = {
+  getAutoTunnelService,
+  setAutoTunnelServiceForTests,
+  autoTunnelOps,
   listBots,
   getBotLogs,
   getBotHealth,

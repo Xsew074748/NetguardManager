@@ -25,4 +25,6 @@ module.exports = {
   pollerBots: (process.env.POLLER_BOTS || '').split(',').map((s) => s.trim()).filter(Boolean),
   // image ที่อนุญาตให้ระบุต่อ bot ได้ (เฉพาะ bot ทดสอบ — ดู createBot ใน services/docker.js)
   botImageRepo: 'phattadol358/netguard-ai',
+  // image ของ cloudflared ตั้งได้ (บน gnet ใช้ชื่อที่ tag ตรึงเวอร์ชันไว้ในเครื่อง) — ค่าเริ่มต้นเท่าของเดิม
+  cloudflaredImage: process.env.CLOUDFLARED_IMAGE || 'cloudflare/cloudflared:latest',
 };

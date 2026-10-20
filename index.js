@@ -37,6 +37,7 @@ poller.startPolling().catch((err) => logger.error('poller: startPolling ล้�
 
 const server = app.listen(config.port, () => {
   logger.info(`NetGuard Manager listening on port ${config.port}`);
+  require('./services/docker').getAutoTunnelService(); // log สถานะฟีเจอร์ Cloudflare auto-tunnel (ปิดเป็นค่าเริ่มต้น) ตอนเริ่ม
 });
 
 function shutdown(signal) {

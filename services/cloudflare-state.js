@@ -14,7 +14,9 @@ const BOT_NAME_RE = /^[a-z0-9][a-z0-9-]{1,30}$/;
 const STEPS = ['tunnel-created', 'ingress-set', 'dns-created', 'container-started', 'complete'];
 const STATE_KEYS = ['accountId', 'zoneId', 'tunnelId', 'hostname', 'dnsRecordId', 'step'];
 const UPDATABLE_KEYS = ['dnsRecordId', 'step'];
-const ORPHAN_KEYS = ['botName', 'hostname', 'tunnelId', 'dnsRecordId', 'accountId', 'zoneId', 'reason'];
+const ORPHAN_KEYS = ['botName', 'hostname', 'tunnelId', 'dnsRecordId', 'accountId', 'zoneId', 'reason', 'leftovers'];
+// ขั้นที่ยังเหลือค้างให้ cleanup ทำต่อ — เรียงตามลำดับล้างมาตรฐาน (container → DNS → tunnel → token ใน .env)
+const LEFTOVER_STEPS = ['container', 'dns', 'tunnel', 'env-token'];
 const MAX_REASON = 200;
 const VERSION = 1;
 
@@ -72,6 +74,7 @@ function validateFields(obj, { required }) {
     step: (v) => STEPS.includes(v),
     botName: (v) => typeof v === 'string' && BOT_NAME_RE.test(v),
     reason: (v) => typeof v === 'string',
+    leftovers: (v) => Array.isArray(v) && v.every((x) => LEFTOVER_STEPS.includes(x)),
   };
   for (const key of required) {
     if (obj[key] === undefined) throw invalid(`missing field "${key}"`);
@@ -200,13 +203,13 @@ function readOrphanDoc() {
 }
 
 function listOrphans() {
-  return readOrphanDoc().orphans;
+  return readOrphanDoc().orphans.map((o) => ({ ...o, leftovers: Array.isArray(o.leftovers) ? o.leftovers : [] }));
 }
 
 function addOrphan(entry) {
   if (!isPlainObject(entry)) throw invalid('orphan must be an object');
   assertOnlyKeys(entry, ORPHAN_KEYS, 'orphan');
-  validateFields(entry, { required: ORPHAN_KEYS.filter((k) => k !== 'dnsRecordId') });
+  validateFields(entry, { required: ORPHAN_KEYS.filter((k) => k !== 'dnsRecordId' && k !== 'leftovers') });
   const doc = readOrphanDoc(); // ไฟล์เสียต้องหยุดที่นี่ ไม่เขียนทับ
   const previous = doc.orphans.find((o) => o.tunnelId === entry.tunnelId);
   const now = new Date().toISOString();
@@ -218,6 +221,7 @@ function addOrphan(entry) {
     accountId: entry.accountId,
     zoneId: entry.zoneId,
     reason: entry.reason.slice(0, MAX_REASON),
+    leftovers: LEFTOVER_STEPS.filter((step) => (entry.leftovers || []).includes(step)),
     createdAt: previous ? previous.createdAt : now,
     updatedAt: now,
   };
@@ -239,6 +243,7 @@ function removeOrphan(tunnelId) {
 module.exports = {
   CloudflareStateError,
   STEPS,
+  LEFTOVER_STEPS,
   readState,
   listStates,
   writeState,

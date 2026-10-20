@@ -359,3 +359,22 @@ test('สิทธิ์ไฟล์จริง: cloudflare.json และ cf-o
   assert.equal(modeOf(orphansFile()), 0o600);
   fs.rmSync(orphansFile());
 });
+
+// ── orphans: leftovers (ขั้นที่ยังเหลือค้างให้ cleanup ทำต่อ) ───────────────────────────
+test('orphans: leftovers เก็บเฉพาะชื่อขั้นที่รู้จัก (container/dns/tunnel/env-token) ไม่ซ้ำ; ไม่ส่ง = []', () => {
+  const base = { botName: 'lo', hostname: 'lo.example.com', tunnelId: TID, dnsRecordId: null, accountId: ACCT, zoneId: ZONE, reason: 'x' };
+  assert.deepEqual(state.addOrphan(base).leftovers, []);
+  assert.deepEqual(state.addOrphan({ ...base, leftovers: ['tunnel', 'dns', 'tunnel'] }).leftovers, ['dns', 'tunnel']); // เรียงตามลำดับขั้นมาตรฐาน ไม่ซ้ำ
+  assert.deepEqual(state.listOrphans().find((o) => o.tunnelId === TID).leftovers, ['dns', 'tunnel']);
+  for (const bad of [['bogus'], 'dns', [1], [null], ['dns', 'x']]) {
+    assert.throws(() => state.addOrphan({ ...base, leftovers: bad }), CloudflareStateErrorLike, JSON.stringify(bad));
+  }
+  fs.rmSync(orphansFile());
+});
+
+test('listOrphans: รายการเก่าที่ไม่มี leftovers ถูกเติมเป็น [] (ผู้ใช้ไม่ต้องกังวลรูปแบบเก่า)', () => {
+  fs.mkdirSync(path.dirname(orphansFile()), { recursive: true });
+  fs.writeFileSync(orphansFile(), JSON.stringify({ version: 1, orphans: [{ botName: 'old', hostname: 'old.example.com', tunnelId: TID, dnsRecordId: null, accountId: ACCT, zoneId: ZONE, reason: 'legacy', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' }] }));
+  assert.deepEqual(state.listOrphans()[0].leftovers, []);
+  fs.rmSync(orphansFile());
+});

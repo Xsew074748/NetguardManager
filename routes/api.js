@@ -91,10 +91,13 @@ router.post('/bots/:id/test-connection', async (req, res) => {
 
 router.post('/bots', async (req, res) => {
   try {
-    const { name, port, tunnelToken, companyName, image } = req.body || {};
+    const { name, port, tunnelToken, companyName, image, hostname } = req.body || {};
+    const autoTunnel = req.body && (req.body.autoTunnel === true || req.body.autoTunnel === 'true');
     res.locals.audit.target = typeof name === 'string' ? name : null;
-    res.locals.audit.detail = { port: Number(port) || null, image: image || 'default', withTunnel: !!tunnelToken }; // tunnelToken เก็บแค่ว่ามีหรือไม่
-    const bot = await dockerService.createBot({ name, port, tunnelToken, companyName, image });
+    res.locals.audit.detail = { port: Number(port) || null, image: image || 'default', withTunnel: !!tunnelToken, autoTunnel }; // tunnelToken เก็บแค่ว่ามีหรือไม่
+    if (autoTunnel && typeof hostname === 'string') res.locals.audit.detail.hostname = hostname;
+    const bot = await dockerService.createBot({ name, port, tunnelToken, companyName, image, autoTunnel, hostname });
+    if (bot && bot.tunnel) res.locals.audit.detail.tunnel = bot.tunnel.status;
     res.status(201).json(bot);
   } catch (err) {
     handleError(res, err, 'Failed to create bot');
