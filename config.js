@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const { parseBindHost } = require('./services/bind-host');
 
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 8080,
@@ -12,6 +13,8 @@ module.exports = {
   // since dockerode's Binds are resolved by the daemon on the host, not in here)
   botsHostPath: process.env.BOTS_HOST_PATH || '',
   botNetwork: process.env.BOT_NETWORK || 'netguard-net',
+  // IP ที่ bind พอร์ตโฮสต์ของบอทที่สร้างใหม่ (เช่น 127.0.0.1) — ว่าง = ทุก interface เหมือนเดิม; ค่าผิดทำให้ Manager ล้มตอนสตาร์ต
+  botPortBindHost: parseBindHost(process.env.BOT_PORT_BIND_HOST),
   // path ของ SQLite DB ภายใน container — mount เป็น named volume แยกจาก /bots
   // (ดูเหตุผลใน CLAUDE.md หัวข้อ "เฟส 5")
   dbPath: process.env.DB_PATH || '/app/data/stats.db',

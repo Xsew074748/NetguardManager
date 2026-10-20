@@ -415,7 +415,7 @@ async function createBot({ name, port, tunnelToken, companyName, image }) {
       },
       HostConfig: {
         RestartPolicy: { Name: 'always' },
-        PortBindings: { '3000/tcp': [{ HostPort: String(portNum) }] },
+        PortBindings: { '3000/tcp': [config.botPortBindHost ? { HostIp: config.botPortBindHost, HostPort: String(portNum) } : { HostPort: String(portNum) }] },
         Binds: [
           `${hostBotDir}/.env:/app/.env`,
           `${hostBotDir}/data:/app/data`,

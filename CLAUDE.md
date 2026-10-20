@@ -195,6 +195,14 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   Tailscale/loopback เป็น IP เดียวกัน — ถ้าจะแยกคนในวง Tailscale ต้องตั้ง ACL ใน Tailscale admin console
   (งานแยกต่างหาก ยังไม่ได้ทำ)
 
+## พอร์ตโฮสต์ของบอท: BOT_PORT_BIND_HOST
+- ค่าเริ่มต้นว่าง = พฤติกรรมเดิม (พอร์ตโฮสต์ของบอทที่ Manager สร้าง bind ทุก interface) — ตั้งเป็น IPv4 literal เพื่อ bind เฉพาะ IP นั้น เช่น `127.0.0.1`; ค่าผิดรูปแบบ (hostname, IPv6, CIDR, มีช่องว่าง ฯลฯ) = Manager ล้มตอนสตาร์ตพร้อมข้อความ ไม่ถอยไปเปิดทุก interface เงียบๆ
+- **ตอน deploy ต้องตั้ง `BOT_PORT_BIND_HOST=127.0.0.1` ใน compose ของ Manager** (ใน `environment:` หรือไฟล์ .env ของ Manager ที่ compose ส่งผ่าน `env_file`) — ถ้าลืม บอทใหม่จะเปิดพอร์ตทุก interface เหมือนเดิม (ไม่มีอะไรเตือน) ควรตรวจหลัง deploy ด้วย `docker port netguard-<ชื่อ>` ว่าขึ้น `127.0.0.1:<พอร์ต>`
+- มีผลกับ "บอทที่สร้างหลังตั้งค่า" เท่านั้น: binding ถูกกำหนดตอนสร้าง container บอทที่มีอยู่แล้วไม่เปลี่ยน ต้อง recreate (ลบแบบไม่ลบไฟล์ แล้วสร้างใหม่ด้วยชื่อ/พอร์ตเดิม — .env/data/meta.json อยู่ครบ)
+- ไม่กระทบ: Manager poll บอทผ่านชื่อ container บน Docker network (ไม่ผ่านพอร์ตโฮสต์), cloudflared ต่อบอทผ่านเครือข่ายเดียวกัน, container cloudflared (ไม่มี port mapping), `findHostPort` (ดูแค่ PublicPort)
+- ที่หาย: การเข้าบอทผ่านพอร์ตโฮสต์จากเครื่องอื่นใน LAN (เช่นหน้า /setup ของบอท) — ใช้ผ่าน tunnel หรือจากเครื่องโฮสต์เอง
+- ข้อจำกัดเดิม (ยังไม่ได้แก้): `isPortFree` ทดสอบ bind ภายใน container ของ Manager จึงไม่เห็นพอร์ตที่ถูกใช้บนโฮสต์; บอทที่สร้างนอก Manager (compose ของตัวเอง เช่น `3102:3000`) ต้องแก้ที่ไฟล์ compose นั้นเอง
+
 ## หลักการตัดสินใจ
 - Docker เป็น source of truth — ไม่เก็บ state ซ้ำใน DB
   จะใส่ DB เมื่อต้องเก็บสถิติย้อนหลังเท่านั้น
