@@ -207,7 +207,9 @@ test('getLastDetailTs / hasDetailData', () => {
 
 test('getLatest: ค่าดิบล่าสุด ไม่ใช่ค่าเฉลี่ยของ bucket (การ์ด "ตอนนี้")', () => {
   assert.deepEqual(statsDb.getLatest('nobody'), { base: null, omada: null });
-  const t = NOW - 700;
+  // ทั้งสามจุดเวลาต้องอยู่ "ชั่วโมงเดียวกัน" เสมอ: ถ้าใช้ NOW-700 แล้วรันช่วงนาที ~6–12 ของชั่วโมง t กับ t+300 จะตกคนละ bucket รายชั่วโมง
+  // ค่าเฉลี่ย 7d จึงเท่า 90 และเทสต์ล้ม (ขึ้นกับนาฬิกา) — ยึดนาทีที่ 10 ของชั่วโมงที่แล้ว (t+300 = นาทีที่ 15, t+600 = นาทีที่ 20; เป็นอดีตเสมอ)
+  const t = Math.floor(NOW / HOUR) * HOUR - HOUR + 600;
   statsDb.insertDetail('b10', detail({ clients: 10 }), t);
   statsDb.insertDetail('b10', detail({ clients: 90 }), t + 300);
   statsDb.insertSample('b10', { ts: t + 300, state: 'up', problems: { total: 7 }, devices: { hosts: { total: 5, up: 4 } } });

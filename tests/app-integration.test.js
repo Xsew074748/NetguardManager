@@ -118,7 +118,15 @@ test.after(async () => {
     });
     if (child.exitCode === null) child.kill('SIGKILL');
   }
-  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  if (tmp) {
+    // Windows ยังถือไฟล์ stats.db อยู่ชั่วครู่หลัง child ตาย (EBUSY/ENOTEMPTY/EPERM) → ลองใหม่ก่อน; ครอบเฉพาะขั้นลบโฟลเดอร์ชั่วคราวนี้เท่านั้น
+    // ลบไม่ได้จริงก็ log ให้เห็น (ไม่เงียบ) แต่ไม่ทำให้ชุดเทสต์ล้ม — error ของตัวเทสต์/ขั้นอื่นใน hook ไม่ถูกกลืน
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (err) {
+      console.error(`app-integration: ลบโฟลเดอร์ชั่วคราวไม่สำเร็จ (${err.code || err.message}): ${tmp}`);
+    }
+  }
 });
 
 test('static: เสิร์ฟ modals.js / api.js / password-form.js / index.html ถูกต้องพร้อม ETag และ max-age=0', { skip: SKIP }, async () => {

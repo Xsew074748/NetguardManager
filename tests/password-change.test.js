@@ -297,11 +297,18 @@ test('limiter ของเปลี่ยนรหัสแยกจาก login
 });
 
 test('ปลดล็อกเมื่อครบ window', async (t) => {
+  // นาฬิกาจำลอง: เวลาของ limiter เดินเมื่อสั่ง tick เท่านั้น — scrypt ของคำขอรหัสผิดจะช้าแค่ไหนก็ไม่กิน window
+  // (เดิมใช้ windowMs 300ms + sleep จริง 450ms จึงล้มเมื่อ CPU ช้า: คำขอที่ 3 ได้ 200 แทน 429)
+  // ต้องจำลอง 2 อย่าง: Date (ตัดสิน resetTime) และ setInterval (MemoryStore ของ express-rate-limit หมุน current→previous ทุก windowMs
+  // ด้วย timer จริง — client ที่ไม่ถูกแตะข้ามสองรอบหมุนจะถูกลืมและตัวนับรีเซ็ต แม้ Date จะนิ่ง); เปิดก่อน startApp เพราะ limiter สร้าง interval ตอนเริ่ม
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   const a = await startApp(t, { limiter: { max: 2, windowMs: 300 } });
   const cookie = await a.login();
   for (let i = 0; i < 2; i++) await a.change(cookie, { current: rnd('wrong'), next: rnd('new') });
   assert.equal((await a.change(cookie, { current: a.current, next: rnd('new') })).status, 429);
-  await new Promise((r) => setTimeout(r, 450));
+  t.mock.timers.tick(299); // ยังไม่ครบ window (300ms) → ยังล็อก
+  assert.equal((await a.change(cookie, { current: a.current, next: rnd('new') })).status, 429);
+  t.mock.timers.tick(1); // ครบ 300ms พอดี → ปลดล็อก
   assert.equal((await a.change(cookie, { current: a.current, next: rnd('new') })).status, 200);
 });
 
