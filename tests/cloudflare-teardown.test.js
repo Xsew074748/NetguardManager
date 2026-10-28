@@ -65,6 +65,28 @@ test('teardown สำเร็จ: container → DNS → tunnel → token ใน
   assert.equal(fs.existsSync(orphansFile()), false);
 });
 
+test('teardown สำเร็จ: log info 1 บรรทัด ระบุชื่อบอท + hostname + เหตุผล — ไม่มี token/ID ของ Cloudflare (tunnel, DNS record, account, zone)', async () => {
+  seedState();
+  const { service, logs } = build();
+  await service.teardown('shop', { reason: 'bot removal' });
+  const done = logs.filter((l) => l.includes('removed'));
+  assert.equal(done.length, 1, JSON.stringify(logs));
+  assert.match(done[0], /Cloudflare auto-tunnel: .*"shop"/);
+  assert.ok(done[0].includes('shop.example.com'));
+  assert.ok(done[0].includes('bot removal'));
+  for (const secret of [TID, REC, ACCT, ZONE, TOKEN]) assert.ok(!logs.join('\n').includes(secret), 'log ต้องไม่มีค่า ' + secret.slice(0, 6));
+});
+
+test('teardown: log สำเร็จเกิดเฉพาะเมื่อทุกขั้นสำเร็จ — ล้มบางขั้น/ไม่มี state = ไม่มีบรรทัด "removed" (ไม่อ้างว่าสำเร็จ)', async () => {
+  seedState();
+  const partial = build({ failAt: { deleteTunnel: new Error('boom') } });
+  assert.equal((await partial.service.teardown('shop', { reason: 'bot removal' })).status, 'partial');
+  assert.ok(!partial.logs.some((l) => l.includes('removed')), JSON.stringify(partial.logs));
+  const none = build();
+  assert.equal((await none.service.teardown('shop', { reason: 'bot removal' })).status, 'none');
+  assert.deepEqual(none.logs, []);
+});
+
 test('teardown: state ที่ยังไม่มี DNS record id → ข้ามขั้น DNS', async () => {
   seedState({ dnsRecordId: null, step: 'ingress-set' });
   const { service, calls } = build();

@@ -248,6 +248,8 @@ function createAutoTunnelService({ settings, client, state = realState, ops, log
       containerAttempted: true, envAttempted: true, unknown: false, secrets: [],
     };
     const rolled = await rollback(ctx, reason);
+    // ลบสำเร็จต้องมีร่องรอยใน log (ขั้นที่ล้มมี warn อยู่แล้ว) — ชื่อบอท + hostname + เหตุผลเท่านั้น ห้ามใส่ ID ของ tunnel/DNS/account/zone หรือ token
+    if (rolled.ok) logger.info(`Cloudflare auto-tunnel: tunnel and DNS for "${botName}" (${st.hostname}) removed (${reason})`);
     return { status: rolled.ok ? 'removed' : 'partial', rollback: rolled };
   }
 
