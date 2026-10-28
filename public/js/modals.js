@@ -138,7 +138,10 @@ function updateAutoTunnelUi() {
   const auto = on && newBotAutoTunnel.checked;
   newBotHostnameWrap.hidden = !auto;
   newBotToken.disabled = auto;
-  if (on) newBotHostnameHint.textContent = `ต้องเป็น <ชื่อ>.${cloudflareFeature.cloudflareZone}`;
+  if (on) {
+    newBotHostnameSuffix.textContent = cloudflareFeature.cloudflareZone ? `.${cloudflareFeature.cloudflareZone}` : '';
+    newBotHostnameHint.textContent = `พิมพ์เฉพาะชื่อ เช่น office → ได้ office.${cloudflareFeature.cloudflareZone}`;
+  }
 }
 
 function closeCreateModal() {
@@ -177,7 +180,7 @@ async function submitCreateBot() {
     return;
   }
   if (autoTunnel) {
-    const problem = autoHostnameProblem(newBotHostname.value, cloudflareFeature.cloudflareZone);
+    const problem = autoLabelProblem(newBotHostname.value, cloudflareFeature.cloudflareZone);
     if (problem) {
       createError.textContent = problem;
       createError.classList.add('show');
@@ -190,7 +193,8 @@ async function submitCreateBot() {
   createSubmitBtn.textContent = 'กำลังสร้าง...';
   try {
     const bot = await apiCreateBot(buildCreatePayload({
-      name, port, tunnelToken, companyName, autoTunnel, hostname: newBotHostname.value, featureOn,
+      name, port, tunnelToken, companyName, autoTunnel, featureOn,
+      hostname: autoTunnel ? autoHostnameFromInput(newBotHostname.value, cloudflareFeature.cloudflareZone) : '',
     }));
     createModal.classList.remove('show');
     showToast(`สร้าง bot "${name}" สำเร็จ`, 'success');
@@ -850,7 +854,8 @@ function openAutoTunnelModal(name) {
   autoTunnelError.classList.remove('show');
   autoTunnelHostname.classList.remove('error');
   autoTunnelHostname.value = '';
-  autoTunnelHint.textContent = `ต้องเป็น <ชื่อ>.${cloudflareFeature.cloudflareZone}`;
+  autoTunnelHostnameSuffix.textContent = cloudflareFeature.cloudflareZone ? `.${cloudflareFeature.cloudflareZone}` : '';
+  autoTunnelHint.textContent = `พิมพ์เฉพาะชื่อ เช่น office → ได้ office.${cloudflareFeature.cloudflareZone}`;
   autoTunnelModal.classList.add('show');
   autoTunnelHostname.focus();
 }
@@ -862,7 +867,7 @@ function closeAutoTunnelModal() {
 async function submitAutoTunnel() {
   autoTunnelError.classList.remove('show');
   autoTunnelHostname.classList.remove('error');
-  const problem = autoHostnameProblem(autoTunnelHostname.value, cloudflareFeature.cloudflareZone);
+  const problem = autoLabelProblem(autoTunnelHostname.value, cloudflareFeature.cloudflareZone);
   if (problem) {
     autoTunnelError.textContent = problem;
     autoTunnelError.classList.add('show');
@@ -873,7 +878,7 @@ async function submitAutoTunnel() {
   autoTunnelSubmitBtn.disabled = true;
   autoTunnelSubmitBtn.textContent = 'กำลังสร้าง...';
   try {
-    const res = await apiAutoTunnel(autoTunnelTarget, autoTunnelHostname.value.trim().toLowerCase());
+    const res = await apiAutoTunnel(autoTunnelTarget, autoHostnameFromInput(autoTunnelHostname.value, cloudflareFeature.cloudflareZone));
     autoTunnelModal.classList.remove('show');
     const toast = tunnelToastFor(autoTunnelTarget, res.tunnel);
     if (toast) showToast(toast.text, toast.type, toast.duration);

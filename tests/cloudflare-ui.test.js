@@ -288,7 +288,7 @@ const MODAL_ELEMENTS = [
   'removeCloudflareHost', 'removeCloudflareNote', 'createModal', 'createError', 'newBotName', 'newBotPort', 'newBotToken', 'newBotCompany',
   'createSubmitBtn', 'autoTunnelSection', 'newBotAutoTunnel', 'newBotHostnameWrap', 'newBotHostname', 'newBotHostnameHint',
   'cfOrphansBtn', 'cfOrphansModal', 'cfOrphansList', 'autoTunnelModal', 'autoTunnelTitle', 'autoTunnelError', 'autoTunnelHostname',
-  'autoTunnelHint', 'autoTunnelSubmitBtn',
+  'autoTunnelHint', 'autoTunnelSubmitBtn', 'newBotHostnameSuffix', 'autoTunnelHostnameSuffix',
 ];
 
 function loadModals(feature = { cloudflareAutoTunnel: false }) {
@@ -544,4 +544,169 @@ test('ข้อความของฟีเจอร์ใหม่ใน clou
   assert.match(html, /ยังไม่ตรวจว่าเชื่อมต่อได้/);
   const modal = html.slice(html.indexOf('id="autoTunnelModal"'), html.indexOf('id="cfOrphansModal"'));
   assert.doesNotMatch(modal, CLAIMS_ONLINE);
+});
+
+// ── ช่อง hostname แบบ suffix ตายตัว: ผู้ใช้พิมพ์แค่ชื่อ, ชื่อเต็ม (label + zone) ถูกประกอบก่อนส่ง API ──────────────────
+const ZONE_T = 'example.com';
+
+test('autoLabelFromInput: trim + lowercase ก่อน แล้วตัด .zone ท้ายสุด "ครั้งเดียว" (วางชื่อเต็มได้ ไม่ซ้อน suffix)', () => {
+  const { autoLabelFromInput } = loadUi();
+  const cases = [
+    ['test-cfb', 'test-cfb'],
+    ['  Test-CFB ', 'test-cfb'],
+    ['test-cfb.example.com', 'test-cfb'],
+    ['TEST.EXAMPLE.COM', 'test'],
+    ['  Shop.Example.Com  ', 'shop'],
+    ['x.example.com.example.com', 'x.example.com'],
+    ['a.b.example.com', 'a.b'],
+    ['example.com', 'example.com'],
+    ['.example.com', ''],
+    ['', ''],
+  ];
+  for (const [input, label] of cases) assert.equal(autoLabelFromInput(input, ZONE_T), label, JSON.stringify(input));
+  assert.equal(autoLabelFromInput(undefined, ZONE_T), '');
+  assert.equal(autoLabelFromInput(null, ZONE_T), '');
+});
+
+test('autoLabelProblem: ผ่านเฉพาะชื่อชั้นเดียว a-z0-9- (ขีดไม่อยู่หัวท้าย ≤ 63); ที่เหลือมีข้อความ; ผ่าน = ""', () => {
+  const { autoLabelProblem } = loadUi();
+  for (const ok of ['test-cfb', 'a', '0', 'a1', 'a-b-c', 'Test-CFB', ' shop ', 'shop.example.com', 'SHOP.EXAMPLE.COM', 'a'.repeat(63)]) {
+    assert.equal(autoLabelProblem(ok, ZONE_T), '', JSON.stringify(ok));
+  }
+  const bad = [
+    '', '   ', '.example.com', '-a', 'a-', '-', 'a_b', 'a b', 'a.b', 'a.b.example.com', 'x.example.com.example.com',
+    'example.com', 'shop.other.com', 'https://shop', 'https://shop.example.com', 'shop/x', '*', '*.example.com', 'a@b',
+    'ร้าน', 'a\u0000b', 'a\nb', 'a'.repeat(64), 'shop.', '.shop',
+  ];
+  for (const b of bad) assert.ok(autoLabelProblem(b, ZONE_T), JSON.stringify(b));
+});
+
+test('autoLabelProblem: ข้อความบอกเหตุผลเฉพาะ — zone ไม่ทราบ / ไม่กรอก / มีจุด (พูดถึง zone) / อักขระไม่ถูกต้อง', () => {
+  const { autoLabelProblem } = loadUi();
+  assert.match(autoLabelProblem('shop', ''), /zone/);
+  assert.match(autoLabelProblem('', ZONE_T), /กรอก/);
+  assert.match(autoLabelProblem('a.b', ZONE_T), /example\.com/);
+  assert.match(autoLabelProblem('a.b', ZONE_T), /ชั้นเดียว|จุด/);
+  assert.match(autoLabelProblem('a_b', ZONE_T), /a-z/);
+});
+
+test('autoHostnameFromInput: คืนชื่อเต็ม <label>.<zone> เสมอ (ตัวพิมพ์เล็ก) — วางชื่อเต็มก็ได้ผลเท่ากัน', () => {
+  const { autoHostnameFromInput } = loadUi();
+  assert.equal(autoHostnameFromInput('Test-CFB', ZONE_T), 'test-cfb.example.com');
+  assert.equal(autoHostnameFromInput(' test-cfb.EXAMPLE.com ', ZONE_T), 'test-cfb.example.com');
+  assert.equal(autoHostnameFromInput('test-cfb.example.com.example.com', ZONE_T), 'test-cfb.example.com.example.com');
+});
+
+test('ส่งชื่อเต็มเข้า payload: buildCreatePayload รับผล autoHostnameFromInput แล้วได้ hostname เต็มเหมือนเดิม', () => {
+  const { buildCreatePayload, autoHostnameFromInput } = loadUi();
+  const p = JSON.parse(JSON.stringify(buildCreatePayload({
+    name: 'shop', port: 3101, tunnelToken: '', companyName: '', autoTunnel: true, featureOn: true,
+    hostname: autoHostnameFromInput('Test-CFB', ZONE_T),
+  })));
+  assert.deepEqual(p, { name: 'shop', port: 3101, autoTunnel: true, hostname: 'test-cfb.example.com' });
+});
+
+test('autoHostnameProblem (ชื่อเดิม) ใช้ตรรกะเดียวกับ autoLabelProblem — ไม่มีสองชุดกฎ', () => {
+  const { autoHostnameProblem, autoLabelProblem } = loadUi();
+  for (const v of ['shop', 'shop.example.com', 'a.b', 'a.b.example.com', '', 'a_b', 'shop.other.com']) {
+    assert.equal(autoHostnameProblem(v, ZONE_T), autoLabelProblem(v, ZONE_T), JSON.stringify(v));
+  }
+});
+
+test('index.html: ช่อง hostname ทั้งสองอยู่ในกลุ่ม .input-suffix พร้อม span suffix; placeholder เป็นชื่อสั้น (ไม่มีจุด); จำกัด 63 ตัว', () => {
+  const html = read('index.html');
+  for (const [inputId, suffixId] of [['newBotHostname', 'newBotHostnameSuffix'], ['autoTunnelHostname', 'autoTunnelHostnameSuffix']]) {
+    const group = html.match(new RegExp(`<div class="input-suffix">\\s*<input[^>]*id="${inputId}"[^>]*>\\s*<span[^>]*id="${suffixId}"[^>]*></span>\\s*</div>`));
+    assert.ok(group, `${inputId} ต้องอยู่ใน .input-suffix ตามด้วย span#${suffixId}`);
+    assert.match(group[0], /class="input-suffix-text"/);
+    assert.match(group[0], /maxlength="63"/);
+    const ph = group[0].match(/placeholder="([^"]*)"/);
+    assert.ok(ph && ph[1] && !ph[1].includes('.'), 'placeholder ต้องเป็นชื่อสั้นไม่มีจุด');
+  }
+  assert.doesNotMatch(html, /office\.example\.com/);
+});
+
+test('components.css: .input-suffix จัดกลุ่ม input+suffix; สถานะ focus/error ของ input ส่งต่อไปที่ suffix', () => {
+  const css = read('css/components.css');
+  assert.match(css, /\.input-suffix\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.input-suffix-text\s*\{/);
+  assert.match(css, /input\.error\s*\+\s*\.input-suffix-text\s*\{[^}]*var\(--red\)/);
+  assert.match(css, /input:focus\s*\+\s*\.input-suffix-text\s*\{[^}]*var\(--teal\)/);
+});
+
+test('app.js ประกาศตัวแปร DOM ของ span suffix ทั้งสอง', () => {
+  const src = read('js/app.js');
+  assert.match(src, /const newBotHostnameSuffix = document\.getElementById\('newBotHostnameSuffix'\)/);
+  assert.match(src, /const autoTunnelHostnameSuffix = document\.getElementById\('autoTunnelHostnameSuffix'\)/);
+});
+
+test('modals.js (ซอร์ส): ทั้งสองจุดส่ง hostname ผ่าน autoHostnameFromInput; suffix ใส่ด้วย textContent จาก cloudflareZone; ไม่มีส่งค่า input ตรง', () => {
+  const src = read('js/modals.js');
+  assert.match(src, /autoHostnameFromInput\(newBotHostname\.value, cloudflareFeature\.cloudflareZone\)/);
+  assert.match(src, /autoHostnameFromInput\(autoTunnelHostname\.value, cloudflareFeature\.cloudflareZone\)/);
+  assert.match(src, /newBotHostnameSuffix\.textContent = /);
+  assert.match(src, /autoTunnelHostnameSuffix\.textContent = /);
+  assert.doesNotMatch(src, /Suffix\.innerHTML/);
+  assert.doesNotMatch(src, /hostname: newBotHostname\.value/);
+  assert.doesNotMatch(src, /apiAutoTunnel\(autoTunnelTarget, autoTunnelHostname\.value/);
+});
+
+test('updateAutoTunnelUi: suffix ในฟอร์มสร้างบอท = .<zone> (ข้อความ); hint ไม่ใช้รูป <ชื่อ>.zone แบบเดิม; zone ไม่ทราบ → suffix ว่าง', () => {
+  const on = loadModals({ cloudflareAutoTunnel: true, cloudflareZone: 'example.com' });
+  on.ctx.updateAutoTunnelUi();
+  assert.equal(on.el.newBotHostnameSuffix.textContent, '.example.com');
+  assert.match(on.el.newBotHostnameHint.textContent, /example\.com/);
+  assert.doesNotMatch(on.el.newBotHostnameHint.textContent, /<ชื่อ>/);
+  const unknown = loadModals({ cloudflareAutoTunnel: true, cloudflareZone: '' });
+  unknown.ctx.updateAutoTunnelUi();
+  assert.equal(unknown.el.newBotHostnameSuffix.textContent, '');
+});
+
+test('openAutoTunnelModal: suffix = .<zone>; ช่องว่าง; hint ไม่ใช้รูปเดิม', () => {
+  const { ctx, el } = loadModals({ cloudflareAutoTunnel: true, cloudflareZone: 'example.com' });
+  el.autoTunnelHostname.value = 'old';
+  ctx.openAutoTunnelModal('shop');
+  assert.equal(el.autoTunnelHostnameSuffix.textContent, '.example.com');
+  assert.equal(el.autoTunnelHostname.value, '');
+  assert.doesNotMatch(el.autoTunnelHint.textContent, /<ชื่อ>/);
+});
+
+test('submitCreateBot: พิมพ์แค่ชื่อ → ส่ง hostname เต็ม; ตัวพิมพ์ใหญ่/วางชื่อเต็มได้ผลเท่ากัน; a.b ถูกปฏิเสธไม่เรียก API', async () => {
+  const run = async (typed) => {
+    const { ctx, el, calls } = loadModals({ cloudflareAutoTunnel: true, cloudflareZone: 'example.com' });
+    el.newBotName.value = 'shop';
+    el.newBotPort.value = '3101';
+    el.newBotAutoTunnel.checked = true;
+    el.newBotHostname.value = typed;
+    await ctx.submitCreateBot();
+    return { calls, el };
+  };
+  for (const typed of ['test-cfb', 'Test-CFB', 'test-cfb.example.com', ' TEST-CFB.EXAMPLE.COM ']) {
+    const { calls } = await run(typed);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.apiCreateBot)), [{ name: 'shop', port: 3101, autoTunnel: true, hostname: 'test-cfb.example.com' }], typed);
+  }
+  for (const typed of ['a.b', 'a.b.example.com', '', '-x', 'x_y']) {
+    const { calls, el } = await run(typed);
+    assert.deepEqual(calls.apiCreateBot, [], typed);
+    assert.ok(el.createError.classList.contains('show'), typed);
+    assert.ok(el.newBotHostname.classList.contains('error'), typed);
+  }
+});
+
+test('submitAutoTunnel (เมนู ⋮): พิมพ์แค่ชื่อ → apiAutoTunnel ได้ชื่อเต็ม; ชื่อไม่ถูก → แสดง error ไม่เรียก API', async () => {
+  const { ctx, el, calls } = loadModals({ cloudflareAutoTunnel: true, cloudflareZone: 'example.com' });
+  ctx.autoTunnelTarget = 'shop';
+  for (const typed of ['Office', 'office.example.com', ' OFFICE ']) {
+    el.autoTunnelHostname.value = typed;
+    await ctx.submitAutoTunnel();
+  }
+  assert.deepEqual(calls.apiAutoTunnel, [['shop', 'office.example.com'], ['shop', 'office.example.com'], ['shop', 'office.example.com']]);
+  const n = calls.apiAutoTunnel.length;
+  for (const typed of ['a.b', 'a.b.example.com', '', 'a_b']) {
+    el.autoTunnelHostname.value = typed;
+    await ctx.submitAutoTunnel();
+    assert.equal(calls.apiAutoTunnel.length, n, typed);
+    assert.ok(el.autoTunnelError.classList.contains('show'), typed);
+    assert.ok(el.autoTunnelHostname.classList.contains('error'), typed);
+  }
 });

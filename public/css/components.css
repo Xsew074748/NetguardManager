@@ -266,6 +266,17 @@ tbody tr.row-in { animation: row-in .3s ease-out backwards; animation-delay: cal
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,212,160,.15); }
 .field input.error, .field textarea.error { border-color: var(--red); }
 .field input:disabled { opacity: .55; cursor: not-allowed; }
+/* ช่อง hostname: input + .<zone> ตายตัวต่อท้ายในกรอบเดียว; สถานะ focus/error ของ input ส่งต่อให้ suffix ด้วย selector พี่น้อง (ไม่พึ่ง :has) */
+.input-suffix { display: flex; align-items: stretch; }
+.field .input-suffix input[type=text] { flex: 1 1 auto; min-width: 0; width: auto; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-width: 0; }
+.input-suffix-text {
+  display: flex; align-items: center; padding: 0 13px; border: 1.5px solid var(--border); border-left-width: 0;
+  background: var(--bg-deep); color: var(--text-dim); border-radius: 0 8px 8px 0; font-size: 14px; font-family: var(--font);
+  white-space: nowrap; user-select: none; transition: border-color .2s;
+}
+.input-suffix input:focus + .input-suffix-text { border-color: var(--teal); }
+.input-suffix input.error + .input-suffix-text { border-color: var(--red); }
+.input-suffix input:disabled + .input-suffix-text { opacity: .55; }
 .field-readonly { font-size: 13.5px; color: var(--text-dim); padding: 8px 0; }
 
 .checkbox-row { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--text); }

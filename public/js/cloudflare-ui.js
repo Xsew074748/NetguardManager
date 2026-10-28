@@ -22,18 +22,36 @@ function buildCreatePayload({ name, port, tunnelToken, companyName, autoTunnel, 
   return payload;
 }
 
+// ช่อง hostname ในฟอร์มมี .<zone> ต่อท้ายตายตัว ผู้ใช้พิมพ์แค่ชื่อ (label) — ชื่อเต็มประกอบที่ autoHostnameFromInput แล้วส่ง API เหมือนเดิม
+// label ตรงกับกฎของ server (services/cloudflare-auto.js validatePlan): a-z0-9 และ - ไม่ขึ้นต้น/ลงท้ายด้วย - ยาวไม่เกิน 63
+const AUTO_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// trim + ตัวพิมพ์เล็ก "ก่อน" แล้วตัด .<zone> ท้ายสุดครั้งเดียว (ผู้ใช้วางชื่อเต็มได้ แต่ซ้อน suffix สองชั้นไม่ได้)
+function autoLabelFromInput(input, zoneName) {
+  let v = String(input == null ? '' : input).trim().toLowerCase();
+  const zone = String(zoneName || '').toLowerCase();
+  if (zone && v.endsWith(`.${zone}`)) v = v.slice(0, -(zone.length + 1));
+  return v;
+}
+
 // ตรวจเบื้องต้นฝั่งหน้าเว็บให้ผู้ใช้เห็นเร็ว (server ตรวจจริงอีกชั้น: รูปแบบ, ชื่อสงวน, ชนกับ DNS/tunnel เดิม) — คืน '' ถ้าผ่าน
-function autoHostnameProblem(hostname, zoneName) {
+function autoLabelProblem(input, zoneName) {
   if (!zoneName) return 'ยังไม่ทราบ zone ของ Cloudflare — โหลดหน้าใหม่แล้วลองอีกครั้ง';
-  const h = String(hostname || '').trim().toLowerCase();
-  if (!h) return 'กรอก hostname ที่ต้องการ';
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h)) {
-    return 'hostname ใช้ได้เฉพาะ a-z, 0-9, - และจุด (ห้าม https://, เครื่องหมายพิเศษ, ช่องว่าง)';
-  }
-  const suffix = `.${zoneName}`;
-  if (!h.endsWith(suffix)) return `hostname ต้องเป็น <ชื่อ>${suffix}`;
-  if (h.slice(0, -suffix.length).includes('.')) return `ต้องมีชื่อหน้า ${zoneName} เพียงชั้นเดียว (เช่น office${suffix})`;
+  const label = autoLabelFromInput(input, zoneName);
+  if (!label) return 'กรอกชื่อที่ต้องการ (เช่น office)';
+  if (label.includes('.')) return `พิมพ์เฉพาะชื่อชั้นเดียว ห้ามมีจุด — ระบบเติม .${zoneName} ให้เอง (เช่น office)`;
+  if (!AUTO_LABEL_RE.test(label)) return 'ชื่อใช้ได้เฉพาะ a-z, 0-9 และ - (ห้ามขึ้นต้น/ลงท้ายด้วย -, ไม่เกิน 63 ตัว; ห้าม https://, เครื่องหมายพิเศษ, ช่องว่าง)';
   return '';
+}
+
+// ชื่อเต็มที่ส่ง API (เรียกหลัง autoLabelProblem ผ่านแล้ว)
+function autoHostnameFromInput(input, zoneName) {
+  return `${autoLabelFromInput(input, zoneName)}.${zoneName}`;
+}
+
+// ชื่อเดิม: ใช้กฎเดียวกับ autoLabelProblem (รับทั้งชื่อสั้นและชื่อเต็ม) — ไม่เก็บกฎสองชุด
+function autoHostnameProblem(hostname, zoneName) {
+  return autoLabelProblem(hostname, zoneName);
 }
 
 function cfRollbackText(rollback) {

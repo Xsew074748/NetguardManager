@@ -167,7 +167,10 @@
           <label class="checkbox-row"><input type="checkbox" id="newBotAutoTunnel"> สร้าง Cloudflare Tunnel อัตโนมัติ</label>
           <div id="newBotHostnameWrap" hidden>
             <label for="newBotHostname">Hostname</label>
-            <input type="text" id="newBotHostname" autocomplete="off" placeholder="เช่น office.example.com">
+            <div class="input-suffix">
+              <input type="text" id="newBotHostname" autocomplete="off" maxlength="63" placeholder="เช่น office" aria-describedby="newBotHostnameHint">
+              <span class="input-suffix-text" id="newBotHostnameSuffix"></span>
+            </div>
             <div class="field-hint" id="newBotHostnameHint"></div>
           </div>
           <div class="field-hint">Manager จะสร้าง tunnel, ตั้ง hostname ชี้มาที่บอทนี้, สร้าง DNS และเริ่ม cloudflared ให้เอง (ยังไม่ตรวจว่าเชื่อมต่อได้ — ดูผลที่ "ดู Tunnel Log") — ถ้าติ๊กอันนี้ ช่อง Token ด้านล่างจะไม่ถูกใช้</div>
@@ -359,7 +362,10 @@
       <div class="form-error" id="autoTunnelError"></div>
       <div class="field">
         <label for="autoTunnelHostname">Hostname</label>
-        <input type="text" id="autoTunnelHostname" autocomplete="off" placeholder="เช่น office.example.com">
+        <div class="input-suffix">
+          <input type="text" id="autoTunnelHostname" autocomplete="off" maxlength="63" placeholder="เช่น office" aria-describedby="autoTunnelHint">
+          <span class="input-suffix-text" id="autoTunnelHostnameSuffix"></span>
+        </div>
         <div class="field-hint" id="autoTunnelHint"></div>
       </div>
     </div>
