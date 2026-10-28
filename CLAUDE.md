@@ -265,16 +265,18 @@ Dashboard จัดการบอทหลายตัวบน server เด�
 - `.env` ถูก mount เข้า container เป็นไฟล์เดี่ยว: การเขียน atomic ทำให้ container เห็นไฟล์เก่าจนกว่าจะ restart
   "บันทึก" = ไม่ restart (ค่าใหม่ยังไม่มีผล); "บันทึกและ Restart" = **restart production จริง** ใช้เมื่อพร้อมเท่านั้น
 
-## Cloudflare Tunnel อัตโนมัติ (ปิดเป็นค่าเริ่มต้น — ยังไม่เคยเปิดกับ Cloudflare จริง)
+## Cloudflare Tunnel อัตโนมัติ (ปิดเป็นค่าเริ่มต้น — เปิดบน gnet และทดสอบกับ Cloudflare จริงแล้วเมื่อ 2026-10-28: สร้าง/ลบบอททดสอบครบวง)
 แผนเต็ม: `cf-auto-tunnel-plan.md` (อยู่นอก repo, โฟลเดอร์ backups/predeploy) · โค้ด: services/cloudflare*.js, services/bot-lock.js, public/js/cloudflare-ui.js
 - **เปิดได้ก็ต่อเมื่อครบทั้งหมด**: `CF_API_TOKEN_FILE` (ไฟล์ token ที่ mount เป็น secret, ค่าเริ่มต้น /run/secrets/cf_token), `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `CF_ZONE_NAME`
   ขาด/ผิดอย่างใด → ปิดและ log เหตุผลเป็น "ชื่อตัวแปร" (ไม่แสดงค่า/พาธไฟล์ลับ); `CF_AUTO_TUNNEL=false` ปิดชัดเจน; ไม่ตั้งอะไรเลย = ปิดเงียบๆ
   เสริม: `CF_RESERVED_HOSTS` (เพิ่มชื่อสงวนได้อย่างเดียว — bot, www, mail ฯลฯ สงวนเสมอ ปลดด้วย config ไม่ได้), `CF_TIMEOUT_MS`, `CLOUDFLARED_IMAGE` (ชื่อ image ของ cloudflared; บน gnet ให้ tag image ที่ตรึงเวอร์ชันไว้แล้วชี้มาที่ชื่อนี้ — ทางอัตโนมัติ **ไม่ pull** image ให้)
 - token ของ API ไม่อยู่ใน env/volume/.env/log/audit/response; อ่านจากไฟล์สดทุกคำขอ (rotate ได้); ข้อความ error ถูก scrub (token ที่รู้ค่า + สตริงหน้าตาเป็น token)
+- **ช่อง hostname ในหน้าเว็บ**: แสดง `.<zone>` ตายตัวต่อท้ายช่อง ผู้ใช้พิมพ์แค่ชื่อ (`office`); วางชื่อเต็มได้ (ตัด suffix ครั้งเดียวหลัง trim+lowercase) ส่วน `a.b` ถูกปฏิเสธ; ฟังก์ชันล้วนอยู่ใน `public/js/cloudflare-ui.js` (`autoLabelFromInput` / `autoLabelProblem` / `autoHostnameFromInput`) และ **ส่งชื่อเต็มให้ API เหมือนเดิม** (backend ไม่เปลี่ยน, ชื่อสงวนยังตรวจที่ server)
 - **สร้างบอท** (`POST /api/bots` + `autoTunnel:true, hostname`): ล็อกต่อชื่อบอท → preflight อ่านอย่างเดียว (กฎ hostname: <ชื่อ>.<zone> ชั้นเดียว, ชื่อสงวน, ชนกับ DNS/tunnel/state/รายการค้าง = 409 ไม่เขียนทับ) → สร้างบอท → tunnel → เขียน state ล่วงหน้า (`bots/<ชื่อ>/cloudflare.json`, 0600, ไม่มี token) → ingress → DNS (CNAME proxied) → .env → cloudflared (token ผ่าน env TUNNEL_TOKEN — ยังเห็นได้ใน docker inspect, ได้แค่ไม่โผล่ใน ps)
   ล้มขั้นใด → rollback เฉพาะที่สร้างไปแล้ว (container → DNS → tunnel → token ใน .env → state) แล้ว **เก็บบอทไว้** รายงาน `tunnel.status:"failed"` + ขั้น; ปุ่ม "สร้าง Tunnel อัตโนมัติ" ในเมนูบอท (`POST /api/bots/:name/tunnel/auto`) ลองใหม่
   คำขอสร้างที่ผลไม่แน่ชัด (timeout/5xx) ไม่ retry — ตรวจสถานะจริงก่อนตัดสิน (พบของเราจึงรับมาลบ, ตรวจไม่ได้ = รายงาน unknown ให้ตรวจเอง)
 - **rollback ล้มบางขั้น**: ทำขั้นถัดไปต่อเสมอ แล้วลงรายการใน `cf-orphans.json` (volume manager-data) พร้อม leftovers; ลง orphan ไม่ได้ = เก็บ state ไว้และ log error; ปุ่ม "Cloudflare ค้าง" ในหน้าเว็บ → "ล้าง" (`POST /api/cloudflare/orphans/:tunnelId/cleanup`)
+- **หลักฐานการลบ**: ลบ Cloudflare สำเร็จ log 1 บรรทัด `Cloudflare auto-tunnel: tunnel and DNS for "<บอท>" (<hostname>) removed (<เหตุผล>)` (image รุ่นก่อนหน้านี้ไม่มีบรรทัดนี้ — ใช้ audit log `bot.remove` → `detail.cloudflare` = removed/partial/kept เป็นหลักฐานหลักเสมอ)
 - **ลบบอท** (`DELETE /api/bots/:id?deleteCloudflare=true`): ล้าง Cloudflare เฉพาะบอทที่มี state และ server ต้องได้ `true` ชัดเจน (หน้าเว็บติ๊กไว้ให้หลังหน้ายืนยัน); ไม่ลบ Cloudflare แต่ลบไฟล์ → ลง orphan ก่อน (ไม่ให้หายเงียบ); state เสีย = ปฏิเสธการลบ (409)
 - **กันลบผิดตัว**: ลบ tunnel ต้อง GET ตาม ID แล้วชื่อตรง `netguard-<บอท>` เป๊ะ (state ถูกแก้ให้ชี้ tunnel production/บอทอื่น = ไม่ลบ); ลบ DNS เฉพาะ CNAME ที่ชี้ tunnel ของเรา; DELETE ได้ 404 ต้อง list ซ้ำยืนยัน; state/orphan ของ account/zone อื่นจากที่ตั้งไว้ = ปฏิเสธ
 - **ข้อควรรู้/ยังไม่ยืนยันกับ API จริง** (มนุษย์ต้องทดสอบก่อนเปิดใช้): การกรอง DNS ด้วย `name.exact`, พฤติกรรม GET tunnel ที่ถูกลบแล้ว (รองรับทั้ง 404 และ deleted_at), rate limit; การตรวจว่า tunnel "ขึ้นจริง" (มี connection) หลังเริ่ม cloudflared ยังไม่ได้ทำ
