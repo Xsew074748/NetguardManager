@@ -76,6 +76,7 @@ Dashboard จัดการบอทหลายตัวบน server เด�
   เผื่อ bot ที่ install แบบ standalone ไม่ผ่าน Manager)
 
 ยังไม่ทำ:
+- **Dockerfile ควรเปลี่ยนเป็น `COPY package.json package-lock.json ./` + `npm ci --omit=dev`** — ตอนนี้ `COPY package.json` แล้ว `npm install` โดยไม่ใช้ lockfile (และ base `node:22-alpine` ลอย) ทำให้ build ต่างวัน/ต่างเครื่องได้ dependency ต่างกันเงียบๆ (พบเมื่อ 2026-10-28: body-parser/on-finished/qs ขยับ patch และ optional deps ของ ssh2 หายระหว่าง `cf-auto-3990ef2` กับ `cf-suffix-f464dd7`) — ยังไม่แก้ ต้องทดสอบ build/ชุดเต็มหลังเปลี่ยน
 - ยังไม่ทดสอบบน Linux server จริง
 - ปุ่ม "ทดสอบการเชื่อมต่อ" ต่อกลุ่มใน config modal (เฟสหน้า)
 
